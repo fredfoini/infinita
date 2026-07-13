@@ -1,0 +1,53 @@
+
+
+===== PAGE 1 =====
+
+INFINITA ENGINE SPECIFICATION
+ Volume 2 – Sistema de Regras
+Objetivo
+Definir todas as regras determinísticas da Engine. O LLM nunca calcula regras; apenas
+interpreta narrativamente seus resultados.
+1. Atributos
+Atributos-base: Força, Destreza, Constituição, Inteligência, Sabedoria e Carisma.
+Valores influenciam apenas testes e cálculos definidos pela Engine.
+2. Perícias
+Cada perícia possui nível de domínio (Iniciante, Aprendiz, Competente, Especialista,
+Mestre, Lendário). Evoluem principalmente pelo uso, treinamento e eventos narrativos.
+3. Profissões
+Profissões são independentes da classe. Um personagem pode aprender múltiplas
+profissões (ferreiro, mercador, alquimista, músico etc.). Cada profissão desbloqueia
+receitas, ações e reputações próprias.
+4. Progressão e XP
+XP é concedido apenas por marcos relevantes: criatividade, exploração, investigação,
+resolução de problemas, diplomacia, descobertas e missões. Ações triviais rendem 0
+XP. Curva lenta sugerida: N2=100, N3=250, N4=450, N5=700, N10≈4000,
+N20≈18000.
+5. Economia
+Toda moeda, preço e transação são calculados pela Engine. Oferta, demanda,
+reputação e região afetam preços. O LLM nunca inventa dinheiro ou altera saldo.
+6. Reputação
+Persistida por indivíduo, cidade, facção, região e reino. Cada ação pode afetar uma ou
+mais camadas de reputação. Reputação influencia diálogos, preços, missões e acesso.
+7. Moral
+Moral representa como o mundo percebe o personagem. Não é alinhamento fixo. É
+composta por histórico de ações observadas e rumores.
+8. Títulos
+
+
+===== PAGE 2 =====
+
+Títulos são conquistas persistentes concedidas automaticamente pela Engine quando
+critérios objetivos forem atingidos. Ex.: 'Herói de Norwich', 'Ladrão Procurado',
+'Mercador Renomado'.
+9. Condições
+Estados temporários: envenenado, cansado, inspirado, bêbado, faminto etc. Possuem
+duração e modificadores claros.
+10. Combate
+A Engine controla iniciativa, alcance, dano, defesa, efeitos, morte e recuperação. O
+LLM apenas narra o resultado produzido pelo motor.
+11. Critérios de Balanceamento
+Não existe grind obrigatório. Combate não é a principal fonte de evolução. Toda
+profissão deve ser capaz de alcançar níveis elevados apenas exercendo sua atividade.
+Critérios de Aceitação
+Todas as alterações de XP, dinheiro, atributos, reputação e inventário devem ser
+reproduzíveis pela Engine sem depender do LLM.

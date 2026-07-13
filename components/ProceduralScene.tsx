@@ -1,4 +1,49 @@
 'use client';
-import { useEffect, useRef } from 'react';
-type Props={location:string;className:string;seed:string}; const hash=(s:string)=>Array.from(s).reduce((n,c)=>((n<<5)-n+c.charCodeAt(0))|0,0)>>>0;
-export default function ProceduralScene({location,className,seed}:Props){const ref=useRef<HTMLCanvasElement>(null);useEffect(()=>{const canvas=ref.current,g=canvas?.getContext('2d');if(!g)return;const rnd=hash(seed+location),kind=/taverna|casa|senhorio/i.test(location)?'tavern':/floresta|bosque/i.test(location)?'forest':/rio|riacho|ponte/i.test(location)?'river':'village';const atlas=new Image();atlas.src='/assets/npc-atlas-transparent.png';let f=0,raf=0;const r=(x:number,y:number,w:number,h:number,c:string)=>{g.fillStyle=c;g.fillRect(x,y,w,h)};const person=(x:number,y:number,coat:string,skin:string,flip=false)=>{if(atlas.complete&&atlas.naturalWidth){const index=(rnd+Math.floor(x)+Math.floor(y))%24,sx=(index%8)*192,sy=Math.floor(index/8)*256;g.save();if(flip){g.translate(x+36,y);g.scale(-1,1);g.drawImage(atlas,sx,sy,192,256,0,0,36,48)}else g.drawImage(atlas,sx,sy,192,256,x,y,36,48);g.restore();return}g.save();if(flip){g.translate(x+18,y);g.scale(-1,1);x=0;y=0}r(x+6,y,7,7,skin);r(x+4,y-2,11,3,'#2c2633');r(x+3,y+7,13,15,coat);r(x+2,y+22+(f%2),5,7,'#2a2934');r(x+10,y+22+((f+1)%2),5,7,'#2a2934');r(x,y+12,4,8,skin);r(x+15,y+12,4,8,skin);g.restore()};const draw=()=>{g.clearRect(0,0,320,180);if(kind==='tavern'){r(0,0,320,180,'#403038');for(let x=0;x<320;x+=32)r(x,0,5,120,'#211e29');for(let y=18;y<115;y+=28)r(0,y,320,3,'#604137');r(0,116,320,64,'#805238');r(198,90,122,43,'#4c3027');r(205,95,108,7,'#b97940');r(18,33,45,42,'#24303b');r(23,38,35,31,'#e7ae63');r(27,43,27,24,'#75503a');r(74,118,54,24,'#805238');r(82,112,38,7,'#bd7f47');person(92,101,'#7c5b85','#e3b580');person(158,98,'#526c8e','#bd835d');person(247,94,'#8b4d42','#dca473',true)}else if(kind==='forest'){r(0,0,320,180,'#2e6257');r(0,94,320,86,'#53744d');for(let i=0;i<9;i++){const x=(i*39+rnd%19)%320;r(x,24+(i%3)*8,13,105,'#273c39');r(x-12,15+(i%4)*8,38,38,'#24533f');r(x-7,6+(i%5)*7,27,25,'#356847')}r(105,100,110,80,'#b89159');for(let y=108;y<180;y+=13)r(110,y,100,2,'#e2bd78');person(148,112,'#586f90','#dca473')}else if(kind==='river'){r(0,0,320,180,'#80b5c7');r(0,64,320,116,'#3c7892');for(let y=72;y<180;y+=14)for(let x=y%35;x<320;x+=48)r(x,y,25,3,'#a7d6d8');r(0,120,86,60,'#496f4b');r(244,116,76,64,'#496f4b');r(85,107,160,13,'#744d34');for(let x=97;x<238;x+=23)r(x,102,5,28,'#47342d');person(152,110,'#8a5f42','#dfae7b')}else{r(0,0,320,180,'#b9d8df');r(0,92,320,88,'#c89f6a');r(0,112,320,68,'#d8b885');for(let i=0;i<5;i++){const x=i*67+(rnd%13);r(x,39+(i%2)*8,42,68,'#67483c');r(x+5,45+(i%2)*8,32,30,'#d2a46b');r(x-2,33+(i%2)*8,46,11,'#3d3035')}for(let y=122;y<180;y+=14)r(0,y,320,2,'#b18458');person(148,105,'#6b587f','#e1ae79')}const glove=/guerreiro|pirata/i.test(className)?'#9e5c40':/mist|druid/i.test(className)?'#785f9f':'#556c65';r(122,161,27,19,glove);r(171,161,27,19,glove);r(151,145,18,35,'#6d4b35')};let last=0;const loop=(t:number)=>{if(t-last>180){f++;draw();last=t}raf=requestAnimationFrame(loop)};draw();raf=requestAnimationFrame(loop);return()=>cancelAnimationFrame(raf)},[location,className,seed]);return <canvas ref={ref} width="320" height="180" aria-label={`Cena pixelada: ${location}`} style={{width:'100%',height:'100%',display:'block',imageRendering:'pixelated'}}/>}
+
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { loadAssetRegistry } from '@/lib/graphics/asset-registry';
+import { composeBuildings } from '@/lib/graphics/building-composer';
+import { composeCharacters } from '@/lib/graphics/character-composer';
+import { preloadSceneAssets, renderScene, type RenderAssets } from '@/lib/graphics/renderer';
+import { composeScene } from '@/lib/graphics/scene-composer';
+
+type Props = { location: string; className: string; seed: string; weather?: string; hour?: number };
+
+export default function ProceduralScene({ location, className, seed, weather = 'Céu limpo', hour = 12 }: Props) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  const [status, setStatus] = useState<'loading' | 'ready' | 'fallback'>('loading');
+  const scene = useMemo(() => composeScene({ location, weather, hour, campaignSeed: seed }), [location, weather, hour, seed]);
+  const buildings = useMemo(() => composeBuildings(scene), [scene]);
+
+  useEffect(() => {
+    const canvas = ref.current;
+    const context = canvas?.getContext('2d');
+    if (!context) return;
+    let cancelled = false;
+    let animation = 0;
+    let frame = 0;
+    let assets: RenderAssets | null = null;
+    const paintFallback = () => {
+      context.imageSmoothingEnabled = false;
+      for (const layer of buildings.layers) { context.fillStyle = layer.color; context.fillRect(layer.x, layer.y, layer.width, layer.height); }
+    };
+    paintFallback();
+    loadAssetRegistry().then(registry => preloadSceneAssets(registry, scene)).then(loaded => {
+      if (cancelled) return;
+      assets = loaded; setStatus('ready');
+      let previous = 0;
+      const loop = (time: number) => {
+        if (time - previous > 160 && assets) { frame += 1; renderScene(context, scene, buildings, composeCharacters(className, scene.seed, frame), assets, frame); previous = time; }
+        animation = requestAnimationFrame(loop);
+      };
+      renderScene(context, scene, buildings, composeCharacters(className, scene.seed, frame), assets, frame);
+      animation = requestAnimationFrame(loop);
+    }).catch(() => { if (!cancelled) { setStatus('fallback'); paintFallback(); } });
+    return () => { cancelled = true; cancelAnimationFrame(animation); };
+  }, [scene, buildings, className]);
+
+  return <div className="scene-renderer">
+    <canvas ref={ref} width="320" height="180" aria-label={`Cena pixel art em ${location}`} />
+    {status === 'loading' && <span className="asset-loading">MONTANDO CENA...</span>}
+  </div>;
+}

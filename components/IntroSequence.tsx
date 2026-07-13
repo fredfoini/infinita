@@ -1,0 +1,50 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import type { GameState } from '@/lib/engine';
+
+export default function IntroSequence({ campaign, onComplete }: { campaign: GameState; onComplete: () => void }) {
+  const [elapsed, setElapsed] = useState(0);
+  const audioRef = useRef<AudioContext | null>(null);
+
+  useEffect(() => {
+    const started = performance.now();
+    const timer = window.setInterval(() => setElapsed((performance.now() - started) / 1000), 100);
+    const AudioContextClass = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (AudioContextClass) {
+      const audio = new AudioContextClass();
+      const master = audio.createGain(); master.gain.value = 0.025; master.connect(audio.destination);
+      const start = audio.currentTime;
+      [174.61, 220, 261.63, 329.63].forEach((frequency, index) => {
+        const oscillator = audio.createOscillator(); const gain = audio.createGain();
+        oscillator.type = index === 3 ? 'sine' : 'triangle'; oscillator.frequency.value = frequency;
+        gain.gain.setValueAtTime(0, start + index * 2.5); gain.gain.linearRampToValueAtTime(0.22, start + index * 2.5 + 0.7); gain.gain.exponentialRampToValueAtTime(0.001, start + index * 2.5 + 4.5);
+        oscillator.connect(gain); gain.connect(master); oscillator.start(start + index * 2.5); oscillator.stop(start + index * 2.5 + 4.8);
+      });
+      audioRef.current = audio;
+    }
+    return () => { window.clearInterval(timer); void audioRef.current?.close(); };
+  }, []);
+
+  function finish() {
+    localStorage.setItem(`infinita-intro-seen:${campaign.campaignId}`, '1');
+    onComplete();
+  }
+
+  return <main className="intro-screen" aria-label="Introdução da campanha">
+    <button type="button" className="intro-skip" onClick={finish}>PULAR</button>
+    <section className="intro-stage">
+      <div className="intro-sky"><i className="intro-sun" /><i className="bird b1" /><i className="bird b2" /></div>
+      <div className="intro-mountains back" /><div className="intro-mountains front" />
+      <div className="intro-forest"><i/><i/><i/><i/><i/><i/></div>
+      <div className="intro-road" />
+      <div className="intro-village" />
+      <div className="intro-hero" />
+      <div className="intro-portal"><i /><span>✦</span></div>
+      <div className="intro-leaves"><i/><i/><i/><i/><i/></div>
+      <div className="intro-brand"><span>INFINITA</span><small>{campaign.character.name} · {campaign.character.className}</small></div>
+      <div className="intro-message"><p>Uma nova aventura criada por você,<br/>como quiser, começa agora…</p>{elapsed >= 11.5 && <button type="button" onClick={finish}>COMEÇAR JORNADA</button>}</div>
+      <div className="intro-progress"><i style={{ width: `${Math.min(100, elapsed / 12 * 100)}%` }} /></div>
+    </section>
+  </main>;
+}

@@ -1,0 +1,127 @@
+{
+  "version": 1,
+  "generatedAt": "2026-07-13T22:37:38.483Z",
+  "visualStandard": {
+    "era": "16-bit handheld",
+    "nativeScene": {
+      "width": 320,
+      "height": 180
+    },
+    "scaling": "nearest-neighbor",
+    "forbidden": [
+      "realistic",
+      "3d",
+      "runtime-ai-generation"
+    ]
+  },
+  "assets": [
+    {
+      "id": "characters.npc.atlas.transparent",
+      "category": "characters",
+      "tags": [
+        "npc",
+        "humanoid",
+        "fantasy",
+        "gba",
+        "transparent"
+      ],
+      "layers": [
+        "character"
+      ],
+      "variants": 32,
+      "animations": [
+        "idle-2-frame"
+      ],
+      "compatibility": [
+        "scene:*",
+        "genre:fantasy"
+      ],
+      "file": "/assets/npc-atlas-transparent.png",
+      "size": {
+        "width": 1536,
+        "height": 1024
+      },
+      "pixelArt": true
+    },
+    {
+      "id": "characters.npc.atlas.source",
+      "category": "source",
+      "tags": [
+        "npc",
+        "atlas",
+        "source"
+      ],
+      "layers": [
+        "source"
+      ],
+      "variants": 32,
+      "animations": [],
+      "compatibility": [
+        "tooling"
+      ],
+      "file": "/assets/npc-atlas-v1.png",
+      "size": {
+        "width": 1536,
+        "height": 1024
+      },
+      "pixelArt": true
+    },
+    {
+      "id": "tiles.props.atlas.01",
+      "category": "tiles-and-props",
+      "tags": [
+        "building",
+        "furniture",
+        "nature",
+        "road",
+        "fantasy",
+        "gba"
+      ],
+      "layers": [
+        "background",
+        "midground",
+        "foreground"
+      ],
+      "variants": 64,
+      "animations": [],
+      "compatibility": [
+        "scene:*",
+        "genre:fantasy"
+      ],
+      "file": "/assets/tile-prop-atlas-v1.png",
+      "size": {
+        "width": 1254,
+        "height": 1254
+      },
+      "pixelArt": true
+    },
+    {
+      "id": "background.settlement.square.01",
+      "category": "background",
+      "tags": [
+        "settlement",
+        "village",
+        "city",
+        "road",
+        "fantasy",
+        "gba"
+      ],
+      "layers": [
+        "background"
+      ],
+      "variants": 1,
+      "animations": [],
+      "compatibility": [
+        "scene:settlement",
+        "scene:city",
+        "genre:fantasy"
+      ],
+      "file": "/assets/village-square-bg-v1.png",
+      "size": {
+        "width": 1672,
+        "height": 941
+      },
+      "pixelArt": true
+    }
+  ]
+}

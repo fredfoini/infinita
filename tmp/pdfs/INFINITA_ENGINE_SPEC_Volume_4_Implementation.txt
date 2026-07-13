@@ -1,0 +1,48 @@
+
+
+===== PAGE 1 =====
+
+INFINITA ENGINE SPECIFICATION
+Volume 4 – Implementação, Arquitetura e
+ Deploy
+Objetivo
+Transformar os conceitos dos volumes anteriores em uma arquitetura de software
+implementável pelo Codex.
+1. Stack Tecnológica
+Frontend: Next.js + React + Tailwind. Backend: Next.js API Routes. Banco:
+Supabase/PostgreSQL. Engine: TypeScript puro. IA desacoplada via interface de
+provedores (OpenAI, Ollama, WebLLM, Gemini etc.).
+2. Estrutura de Pastas
+/app, /components, /engine, /game_master, /models, /api, /database, /sprites, /tilesets,
+/assets, /tests. Separar claramente UI, regras e IA.
+3. Banco de Dados
+Tabelas principais: Campaign, Player, NPC, Location, Quest, Inventory, Reputation,
+Event, WorldMemory, Titles, Professions e Saves. Utilizar UUID em todas as entidades.
+4. APIs
+Endpoints para criar campanha, carregar campanha, salvar turno, executar ação, rolar
+dados, consultar estado e solicitar narrativa ao provedor de IA.
+5. Fluxo Completo
+Frontend envia ação → Engine valida → aplica regras → monta contexto → chama IA
+(quando necessário) → valida JSON → persiste → retorna novo estado e narrativa.
+6. Persistência
+Autosave ao final de cada turno válido. Possibilidade de múltiplas campanhas por
+jogador. Snapshot periódico e histórico de eventos.
+7. Frontend
+Menu inicial moderno inspirado em JRPGs. Painel lateral para atributos. Área central
+para mapa/sprites. Log narrativo. Campo de ação livre. Botão de rolagem de dados.
+8. Testes
+
+
+===== PAGE 2 =====
+
+Criar testes unitários para regras da Engine e integração. Garantir que nenhuma
+atualização de XP, dinheiro ou inventário dependa exclusivamente do LLM.
+9. Deploy
+Deploy no Vercel. Banco no Supabase. Assets estáticos em CDN. Engine desacoplada
+para permitir migração futura.
+10. Roadmap
+MVP: campanha única em Norwich. Beta: geração procedural persistente. v1.0:
+múltiplos mundos. v2.0: multiplayer assíncrono. v3.0: marketplace de campanhas.
+Critérios de Aceitação
+O sistema deve continuar funcionando ao trocar o provedor de IA. A Engine deve ser
+determinística. Todo estado deve ser recuperável por UUID.

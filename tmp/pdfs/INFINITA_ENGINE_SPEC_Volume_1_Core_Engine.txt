@@ -1,0 +1,59 @@
+
+
+===== PAGE 1 =====
+
+INFINITA ENGINE SPECIFICATION
+Volume 1 – Core Engine
+Objetivo
+Este volume define o núcleo da engine. A IA é apenas um narrador e interpretador.
+Toda a verdade do jogo pertence à Engine.
+1. Inicialização do jogo
+Fluxo: (1) Criar UUID da campanha. (2) Criar ou carregar save. (3) Selecionar cenário,
+campanha, classe e nome. (4) Instanciar estado inicial. (5) Gerar primeira cena. (6)
+Entrar no loop principal. Salvar automaticamente a cada turno válido. Nunca perder
+progresso.
+2. Gerenciamento de Estado
+O estado é dividido em: Personagem (atributos, perícias, HP, mana, inventário,
+moedas, profissões, reputação, moral, títulos), Mundo (tempo, clima, cidades, NPCs,
+economia, facções), Campanha (missões, capítulos, memória, eventos), Sessão (cena
+atual e ações recentes). Toda alteração é registrada em histórico. O frontend nunca
+altera estado diretamente.
+3. Sistema de Eventos
+Todo turno gera zero ou mais eventos. Eventos possuem: id, tipo, origem, prioridade,
+gatilho, condições, consequências e persistência. Tipos: jogador, NPC, mundo,
+combate, clima, economia, narrativa. A engine executa a fila por prioridade antes da
+próxima cena.
+4. Gerenciador de Campanha
+Mantém capítulos, objetivos, linhas narrativas, NPCs recorrentes e memória resumida.
+O jogador pode abandonar a missão principal. O mundo continua evoluindo. Norwich é
+conteúdo canônico; regiões desconhecidas são geradas sob demanda e persistidas.
+5. Fluxo de um Turno
+Entrada do jogador → Parser → Motor de Regras → Atualização do Estado → Seleção de
+Eventos → (se necessário) chamada ao LLM → Resposta em JSON → Persistência →
+Renderização da interface.
+6. Contrato com o LLM
+O LLM nunca atualiza XP, dinheiro, HP, inventário ou reputação diretamente. Ele recebe
+apenas o contexto mínimo e retorna JSON com narrativa, necessidade de rolagem,
+mudanças sugeridas e memória resumida. A Engine valida e aplica as mudanças.
+
+
+===== PAGE 2 =====
+
+7. Persistência
+Toda campanha possui UUID. Salvar automaticamente em banco/localStorage.
+Persistir: personagem, NPCs, locais, relações, economia, reputação, moral, títulos,
+inventário, clima, tempo, eventos futuros e mundo gerado.
+8. JSON Canônico
+Resposta mínima: { scene, narrative, requiresDice, diceType, difficulty,
+suggestedEvents[], memorySummary, imagePrompt } A Engine converte esse JSON
+em alterações de estado.
+9. Princípios
+A Engine é a autoridade. A IA nunca contradiz o estado. Não existe retcon automático.
+O jogador possui liberdade textual total. O mundo reage de forma consistente e
+persistente. Todas as mecânicas são determinísticas; apenas interpretação narrativa
+depende do LLM.
+Critérios de Aceitação
+• Campanhas retomam exatamente do último turno. • Eventos sobrevivem ao reinício.
+• Nenhum dado crítico depende exclusivamente do LLM. • Norwich permanece
+consistente. • Regiões novas tornam-se permanentes após criadas. • O frontend é
+apenas uma representação do estado.

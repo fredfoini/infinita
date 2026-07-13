@@ -1,26 +1,55 @@
 import { NextResponse } from 'next/server';
-import { advanceDemo, type GameState } from '@/lib/engine';
+import { acceptNarrative, acceptSuggestedRoll, beginAction, buyProduct, migrateState, resolvePendingRoll, spendAttributePoint, useInventoryItem, type AttributeKey } from '@/lib/engine';
+import { narrateTurn } from '@/lib/game-master';
 
-type Roll = { skill: string; die: number; bonus: number; total: number; difficulty: number };
-type AiTurn = { narrative?: string; needsRoll?: boolean; rollSkill?: string; rollDifficulty?: number; location?: string; locationChanged?: boolean };
+export const runtime = 'nodejs';
+
+type Payload = { kind?: 'action' | 'roll' | 'attribute' | 'useItem' | 'buyItem'; action?: string; attribute?: string; itemId?: string; shopId?: string; productId?: string; state?: unknown };
 
 export async function POST(request: Request) {
-  const { action, state, roll } = await request.json() as { action?: string; state?: GameState; roll?: Roll };
-  if (!action?.trim() || !state) return NextResponse.json({ error: 'Descreva uma ação.' }, { status: 400 });
-  const { sceneImage: _ignored, ...cleanState } = state;
-  const baseline = roll ? { narrative: '', needsRoll: false, rollSkill: null, rollDifficulty: null, scene: cleanState.location, locationChanged: false, state: cleanState } : advanceDemo(cleanState, action);
-  const key = process.env.OPENAI_API_KEY;
-  if (!key) return NextResponse.json({ ...baseline, mode: 'fallback', error: 'OPENAI_API_KEY não configurada.' });
-  const rollContext = roll ? `Resultado do teste já realizado: ${roll.skill}, d20 ${roll.die} + ${roll.bonus} = ${roll.total}, CD ${roll.difficulty}. ${roll.total >= roll.difficulty ? 'SUCESSO' : 'FALHA'}. Narre a consequência concreta e continue a cena; não peça nova rolagem para o mesmo risco.` : '';
-  const prompt = `Você é o Mestre de Jogo do RPG INFINITA. Simule um mundo vivo, coerente e persistente. Nunca ofereça opções fechadas. Responda somente JSON: {"narrative":string,"needsRoll":boolean,"rollSkill":string|null,"rollDifficulty":number|null,"location":string,"locationChanged":boolean}. Em português, escreva 2 a 4 frases curtas, com diálogo quando couber, e termine exatamente com "O que você faz?". Peça d20 somente quando há risco, incerteza e consequência. Não dê XP, itens ou títulos na narrativa: o motor calcula isso. Estado: ${JSON.stringify(cleanState)}. Ação: ${action}. ${rollContext}`;
   try {
-    const response = await fetch('https://api.openai.com/v1/chat/completions', { method: 'POST', headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ model: process.env.OPENAI_MODEL || 'gpt-4.1-mini', response_format: { type: 'json_object' }, messages: [{ role: 'system', content: prompt }] }) });
-    if (!response.ok) throw new Error(await response.text());
-    const ai = JSON.parse((await response.json()).choices[0].message.content) as AiTurn;
-    const next = { ...baseline.state, location: ai.location || baseline.state.location };
-    return NextResponse.json({ ...baseline, narrative: ai.narrative || baseline.narrative, needsRoll: ai.needsRoll ?? baseline.needsRoll, rollSkill: ai.rollSkill || baseline.rollSkill, rollDifficulty: ai.rollDifficulty || baseline.rollDifficulty, scene: next.location, locationChanged: ai.locationChanged ?? baseline.locationChanged, state: next, mode: 'ai' });
+    const payload = await request.json() as Payload;
+    const state = migrateState(payload.state);
+    if (!state) return NextResponse.json({ error: 'Estado de campanha inválido.' }, { status: 400 });
+
+    if (payload.kind === 'attribute') {
+      const result = spendAttributePoint(state, payload.attribute as AttributeKey);
+      return NextResponse.json({ state: result.state, narrative: result.state.session.narrative, requiresDice: false, events: result.events, mode: 'engine' });
+    }
+
+    if (payload.kind === 'useItem') {
+      const result = useInventoryItem(state, payload.itemId || '');
+      const next = acceptNarrative(result.state, result.narrative);
+      return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: false, events: result.events, mode: 'engine' });
+    }
+
+    if (payload.kind === 'buyItem') {
+      const result = buyProduct(state, payload.shopId || '', payload.productId || '');
+      const next = acceptNarrative(result.state, result.narrative);
+      return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: false, events: result.events, mode: 'engine' });
+    }
+
+    if (payload.kind === 'roll') {
+      const action = state.session.pendingRoll?.action;
+      if (!action) return NextResponse.json({ error: 'Não há rolagem pendente.' }, { status: 409 });
+      const resolved = resolvePendingRoll(state);
+      const narration = await narrateTurn(resolved.state, action, resolved.fallbackNarrative, resolved.result);
+      const next = acceptNarrative(resolved.state, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate);
+      return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: false, roll: null, rollResult: resolved.result, events: resolved.events, mode: narration.mode, warning: narration.error });
+    }
+
+    const action = payload.action?.trim();
+    if (!action) return NextResponse.json({ error: 'Descreva uma ação.' }, { status: 400 });
+    const turn = beginAction(state, action);
+    const narration = await narrateTurn(turn.state, action, turn.fallbackNarrative);
+    let next = turn.state;
+    if (!next.session.pendingRoll && narration.reply.requiresDice) {
+      next = acceptSuggestedRoll(next, action, { skill: narration.reply.skill, attribute: narration.reply.attribute, difficulty: narration.reply.difficulty, reason: narration.reply.reason });
+    }
+    next = acceptNarrative(next, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate);
+    return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: Boolean(next.session.pendingRoll), roll: next.session.pendingRoll, rollResult: null, events: turn.events, mode: narration.mode, warning: narration.error });
   } catch (error) {
-    console.error('INFINITA AI failed', error);
-    return NextResponse.json({ ...baseline, mode: 'fallback', error: error instanceof Error ? error.message.slice(0, 180) : 'Falha na IA.' });
+    console.error('INFINITA turn failed', error);
+    return NextResponse.json({ error: error instanceof Error ? error.message : 'Não foi possível processar o turno.' }, { status: 500 });
   }
 }

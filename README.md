@@ -1,21 +1,56 @@
-# INFINITA Engine MVP
+# INFINITA Engine - Sprint Core
 
-RPG narrativo de texto com interface inspirada em Game Boy, pronto para Vercel.
+RPG narrativo em Next.js no qual a Engine TypeScript é a única autoridade sobre estado, dados, XP, atributos, inventário, combate, missões e persistência. A IA interpreta ações e narra consequências por um contrato JSON controlado.
 
-## Publicar
+## Executar
 
-1. Envie esta pasta para um repositório GitHub e importe-o na Vercel.
-2. Defina `OPENAI_API_KEY` nas variáveis de ambiente para usar a engine de IA.
-3. Para imagens por IA em mudanças de local, defina `ENABLE_IMAGE_GENERATION=true`.
-3. Sem chave, o projeto continua funcionando em modo de demonstração, com progresso guardado no navegador.
+```bash
+pnpm install
+pnpm dev
+```
 
-Para executar localmente: `npm install` e `npm run dev`.
+Validação:
 
-## Progressão
+```bash
+pnpm test
+pnpm build
+```
 
-O navegador guarda várias campanhas, cada uma com personagem, classe, títulos, perícias ocultas, reputação global/local/regional/por NPC e XP. Imagens só são solicitadas quando a IA indica que o personagem mudou de local.
+## Vercel
 
-## Supabase (opcional)
+Configure em **Settings > Environment Variables**:
 
-Crie uma tabela `campaigns` com colunas: `id text primary key`, `state jsonb not null`, `updated_at timestamptz default now()`.
-Depois configure `NEXT_PUBLIC_SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY`.
+- `GROQ_API_KEY`: chave da API Groq para o Mestre textual.
+- `GROQ_MODEL`: opcional; o padrão atual é `llama-3.3-70b-versatile`.
+
+Sem chave ou em caso de falha do provedor, a Engine mantém o turno e usa uma narrativa de segurança. As imagens são locais e não consomem API.
+
+Não envie `.next`, `node_modules` ou arquivos `.env` ao GitHub.
+
+## Arquitetura atual
+
+- `lib/engine.ts`: estado canônico, eventos, regras, progressão, rolagens, inventário, combate, reputação, missões e migração de saves.
+- `lib/game-master.ts`: adaptador isolado do provedor de IA e compressão de contexto.
+- `app/api/campaign`: criação e contexto inicial de campanha.
+- `app/api/turn`: ações, d20, atributos e uso de itens.
+- `components/Game.tsx`: frontend que renderiza o estado e solicita comandos à Engine.
+- `components/ProceduralScene.tsx`: compositor local de cenas, NPCs, clima e horário.
+- `lib/graphics/asset-registry.ts`: catálogo carregado progressivamente no cliente.
+- `lib/graphics/scene-composer.ts`: transforma contexto em uma cena genérica reutilizável.
+- `lib/graphics/character-composer.ts`: escolhe variantes e paleta de personagens.
+- `lib/graphics/building-composer.ts`: monta módulos de cenário sem acoplamento narrativo.
+- `lib/graphics/renderer.ts`: desenha as camadas no canvas em 320×180.
+- `public/assets/sprite_bible.json`: catálogo gerado automaticamente por `pnpm assets:catalog` e também durante o build.
+- `components/IntroSequence.tsx`: abertura leve de aproximadamente 12 segundos, com opção de pular.
+
+## Interface V2
+
+A HUD segue proporção de portátil 16-bit no desktop e vira uma experiência mobile-first em telas menores. A barra de ação permanece fixa no celular; mochila, mapa, missões, ficha e diário abrem em um painel lateral recolhível. Teclado, toque e botão principal de gamepad são aceitos.
+
+## Persistência e memória
+
+Cada campanha recebe UUID e é salva automaticamente no `localStorage` por revisão. Saves da versão anterior são migrados na abertura. A memória é dividida em curto, médio e longo prazo; somente um contexto mínimo é enviado à IA.
+
+## WebLLM
+
+A Engine e o adaptador do Mestre foram desacoplados para permitir WebLLM ou outro provedor no futuro. A migração para WebLLM ficou deliberadamente fora desta sprint, conforme priorização do produto.

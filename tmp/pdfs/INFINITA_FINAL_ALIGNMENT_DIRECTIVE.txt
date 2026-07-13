@@ -1,0 +1,49 @@
+
+
+===== PAGE 1 =====
+
+INFINITA – Final Alignment Directive for Codex
+Propósito
+Este documento complementa os dois anteriores e deve prevalecer sempre que houver
+dúvida de interpretação. O objetivo é evitar retrabalho e garantir que toda decisão
+preserve a visão original do Infinita.
+1. Prioridade
+A ordem de prioridade é: Experiência do Jogador > Engine > Regras > Persistência >
+Interface > IA. Nenhuma solução técnica pode reduzir a sensação de liberdade do
+jogador.
+2. Liberdade Total
+O jogador escreve qualquer ação e pode criar qualquer classe. Nunca limitar a
+criatividade para simplificar a implementação. A Engine deve adaptar o mundo ao
+jogador, não o contrário.
+3. Engine Primeiro
+Sempre implementar sistemas genéricos e reutilizáveis antes de conteúdo. Nunca criar
+soluções específicas para um único caso narrativo.
+4. IA
+A IA é um narrador especializado. Não controla regras, inventário, XP, economia,
+combate, reputação ou persistência. Sempre responder em JSON estruturado.
+5. Visual
+Todo o jogo deve transmitir a sensação de um JRPG portátil moderno. Interface limpa,
+calorosa e altamente legível. Mobile-first. Pixel art 16-bit consistente. Evitar telas
+poluídas.
+6. Asset System
+Antes de adicionar novos sprites, verificar se o efeito desejado pode ser obtido
+combinando módulos existentes. Favorecer reutilização máxima.
+7. Performance
+Priorizar inicialização rápida, baixo consumo de memória, carregamento progressivo
+de assets e animações leves. O jogo deve funcionar confortavelmente em celulares
+intermediários.
+8. UX
+
+
+===== PAGE 2 =====
+
+Cada interação deve exigir o menor número possível de cliques. Autosave invisível.
+Feedback visual imediato. Navegação intuitiva mesmo para quem nunca jogou RPG.
+9. Escalabilidade
+Toda funcionalidade nova deve poder ser reutilizada em outros mundos, campanhas e
+gêneros. Nunca acoplar sistemas à fantasia medieval.
+10. Critério Final
+Quando houver duas implementações possíveis, escolher sempre a mais modular,
+reutilizável, testável, barata de manter e mais fiel à fantasia de 'um mundo que reage
+às escolhas do jogador'. Se alguma especificação estiver ambígua, preservar essa
+visão em vez de buscar a solução mais simples.

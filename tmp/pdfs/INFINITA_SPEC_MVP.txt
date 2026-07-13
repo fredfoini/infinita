@@ -1,0 +1,51 @@
+
+
+===== PAGE 1 =====
+
+INFINITA ENGINE SPECIFICATION – MVP
+Visão
+INFINITA é uma engine de RPG narrativo com IA. O jogador escreve qualquer ação em
+linguagem natural; a IA atua como Mestre de Jogo. O foco é liberdade, persistência e
+consequências.
+Princípios
+• Nunca oferecer opções fixas como mecânica principal.
+• O jogador controla apenas seu personagem.
+• O mundo continua existindo independentemente do jogador.
+• NPCs possuem memória, rotina, objetivos e conhecimento limitado.
+• Toda consequência deve ser coerente com o mundo.
+Narrativa
+Respostas curtas, ritmo rápido, muito diálogo e pouca exposição. Sempre terminar
+com “O que você faz?”. Pedir rolagens apenas quando houver risco ou incerteza
+relevante.
+Sistema
+Atributos: Força, Destreza, Constituição, Inteligência, Sabedoria e Carisma.
+Perícias evoluem pela prática (Iniciante → Lendário).
+Rolagens: d20 + bônus contra uma CD definida pela IA.
+Progressão
+XP vem principalmente de criatividade, exploração, profissões, interpretação,
+investigação, diplomacia e resolução de problemas; combate é apenas uma das
+possibilidades. O jogador escolhe onde investir atributos e perícias ao subir de nível.
+Mundo
+Persistir: personagem, inventário, NPCs, cidades, facções, reputação, moral, títulos,
+economia, tempo, clima, missões e linha do tempo.
+Reputação é separada por cidade, facção, região e reino. Moral representa percepção
+social, não “bem” ou “mal”.
+Frontend
+Visual minimalista estilo Game Boy: fundo preto, moldura branca, imagem pixel art em
+primeira pessoa, narrativa abaixo, painel do personagem à direita e caixa de texto
+inferior. Botão de dado aparece apenas quando necessário.
+Backend
+Next.js + TypeScript + Supabase + OpenAI + Vercel. O frontend apenas renderiza;
+toda lógica reside na engine. A IA responde em JSON contendo narrativa, atualizações
+
+
+===== PAGE 2 =====
+
+do personagem, estado do mundo, necessidade de rolagem e prompt de imagem.
+Persistência
+Cada navegador recebe um UUID automático. A campanha continua exatamente do
+ponto em que foi interrompida, sem necessidade de cadastro.
+Objetivo
+Criar uma engine reutilizável para qualquer cenário (fantasia, faroeste, cyberpunk
+etc.), onde o jogador esqueça que conversa com uma IA e sinta que participa de uma
+campanha infinita conduzida por um Mestre consistente.

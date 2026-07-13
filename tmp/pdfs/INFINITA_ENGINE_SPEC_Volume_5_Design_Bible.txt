@@ -1,0 +1,46 @@
+
+
+===== PAGE 1 =====
+
+INFINITA DESIGN BIBLE
+Volume 5 – Filosofia, Identidade e Direção
+ Criativa
+Propósito
+O Infinita não é um jogo de escolhas A/B/C. É um RPG de liberdade textual onde a
+Engine garante consistência e a IA interpreta o mundo.
+Princípios
+O jogador nunca perde liberdade de ação. Toda escolha gera consequências. O mundo
+lembra. NPCs possuem memória. Não existe roteiro obrigatório.
+Tom Narrativo
+Fantasia medieval acolhedora ('cozy fantasy') com momentos épicos. Narrativa
+cinematográfica, objetiva e reativa. Mostrar consequências em vez de explicá‑las.
+Norwich
+Norwich é o núcleo canônico. História, geografia e facções são fixas. O restante do
+mundo cresce organicamente conforme a exploração e passa a ser persistente.
+Game Master
+Nunca controlar o protagonista. Nunca resolver problemas pelo jogador. Sempre
+apresentar oportunidades, riscos e consequências. Pedir rolagens apenas quando
+houver incerteza relevante.
+Direção de Arte
+Pixel art 16-bit inspirada em Game Boy Advance JRPGs. Interface retrô moderna.
+Sprites consistentes. Paleta vibrante. Nada de arte realista ou 3D.
+Direção Sonora
+Trilhas originais em folk/ambient medieval. Loops discretos. Música reforça exploração,
+descoberta e contemplação.
+Experiência do Jogador
+Cada campanha deve parecer única. O jogador pode ser herói, mercador, ladrão,
+diplomata, artesão ou simplesmente viver naquele mundo.
+Valores de Design
+
+
+===== PAGE 2 =====
+
+Liberdade acima de roteiro. Persistência acima de espetáculo. Sistemas acima de
+scripts. Consequências acima de recompensas imediatas.
+Anti‑Patterns
+Nunca teletransportar o jogador sem motivo. Nunca esquecer decisões importantes.
+Nunca conceder XP por ações triviais. Nunca quebrar regras da Engine para favorecer
+narrativa.
+Visão de Longo Prazo
+Transformar o Infinita em uma engine narrativa reutilizável para fantasia, faroeste,
+ficção científica, terror e outros universos mantendo o mesmo núcleo sistêmico.
