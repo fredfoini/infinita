@@ -3,6 +3,7 @@ import { acceptNarrative, acceptSuggestedRoll, applyNarrativeWorldDelta, beginAc
 import { narrateTurn } from '@/lib/game-master';
 import { ProviderFactory } from '@/lib/providers/provider-factory';
 import type { ItemAction } from '@/lib/items/item-engine';
+import { applyCampaignSharingDecision } from '@/lib/content-sharing-policy';
 
 export const runtime = 'nodejs';
 
@@ -26,8 +27,9 @@ export async function POST(request: Request) {
   const respond = (body: object, status = 200, detail = '') => NextResponse.json(body, { status, headers: { 'Server-Timing': `${detail}${detail ? ',' : ''}total;dur=${(performance.now() - started).toFixed(1)}` } });
   try {
     const payload = await request.json() as Payload;
-    const state = migrateState(payload.state);
+    let state = migrateState(payload.state);
     if (!state) return respond({ error: 'Estado de campanha inválido.' }, 400);
+    state = applyCampaignSharingDecision(state, payload.action || state.session.pendingRoll?.action || '');
 
     if (payload.kind === 'attribute') {
       const result = spendAttributePoint(state, payload.attribute as AttributeKey);

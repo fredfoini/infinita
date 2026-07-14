@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server';
 import { applyGenesis, createInitialState, type NewCampaignInput } from '@/lib/engine';
 import { generateCampaign } from '@/lib/game-master';
+import { applyCampaignSharingDecision } from '@/lib/content-sharing-policy';
 
 export const runtime = 'nodejs';
 
@@ -16,7 +17,7 @@ export async function POST(request: Request) {
       appearanceDescription: body.appearanceDescription?.trim().slice(0, 220) || '',
     };
     if (!input.campaignName || !input.characterName || !input.className || !input.openingPrompt) return NextResponse.json({ error: 'Preencha campanha, personagem, classe e como a história começa.' }, { status: 400 });
-    let state = createInitialState(input);
+    let state = applyCampaignSharingDecision(createInitialState(input), input.openingPrompt);
     const generation = await generateCampaign(input, state);
     if (generation.genesis) state = applyGenesis(state, generation.genesis);
     return NextResponse.json({ state, mode: generation.mode, warning: generation.error });

@@ -19,11 +19,6 @@ type SceneVisualProps = {
   onIllustrationResolved?: (assetId: string, generated: boolean) => void;
 };
 
-const COMPOSED_LOCATION_TYPES = new Set([
-  'city', 'village', 'road', 'tavern', 'inn', 'forest', 'wild', 'river', 'harbor',
-  'mine', 'cave', 'ruin', 'castle', 'church', 'temple', 'shop', 'workshop', 'mountain',
-]);
-
 function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
   const cycle = state.visualCycle;
   const descriptor = useMemo(
@@ -39,8 +34,7 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
     let cancelled = false;
     setAsset(null);
     setStatus('parchment');
-    const hasNativeComposition = COMPOSED_LOCATION_TYPES.has(descriptor.locationType.toLocaleLowerCase('pt-BR'));
-    if (cycle.currentPhase !== 'illustration' || hasNativeComposition) return () => { cancelled = true; };
+    if (cycle.currentPhase !== 'illustration') return () => { cancelled = true; };
 
     async function resolveIllustrationBlock() {
       // An illustration already attached to this block is immutable for all ten actions.
@@ -72,7 +66,7 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
       }
 
       setStatus('generating');
-      const response = await fetch('/api/visual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(descriptor) });
+      const response = await fetch('/api/visual', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ descriptor, parentAssetId: match.asset?.global ? match.asset.id : undefined, localOnly: state.campaign.sharingMode === 'local-only' }) });
       const payload = await response.json() as { asset?: VisualAsset; sanitized?: boolean; generationMs?: number; estimatedCost?: number; error?: string; retryAfterSeconds?: number };
       if (!response.ok || !payload.asset) {
         setProviderStatus({ state: 'unavailable', lastError: payload.error || `Erro ${response.status}`, retryAfter: new Date(Date.now() + (payload.retryAfterSeconds || 900) * 1000).toISOString() });
@@ -99,7 +93,7 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
       updateVisualMetrics({ providerFailures: 1, categoryMiss: descriptor.primaryEmotion });
     });
     return () => { cancelled = true; };
-  }, [state.campaignId, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId, descriptor, onIllustrationResolved]);
+  }, [state.campaignId, state.campaign.sharingMode, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId, descriptor, onIllustrationResolved]);
 
   return <div className="scene-visual" data-source={status} data-phase={cycle.currentPhase}>
     <LayeredWorldScene state={state} illustrationUrl={asset?.fileUrl} />

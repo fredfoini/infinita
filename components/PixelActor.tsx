@@ -24,7 +24,7 @@ function PixelActor({ identity, animation = 'idle', label, className = '', facin
     '--actor-seed': identity.seed % 5,
   } as CSSProperties;
 
-  return <span className={`pixel-actor ${identity.classLayer} ${animation} ${facing === 'left' ? 'face-left' : ''} ${compact ? 'compact' : ''} ${className}`.trim()} role="img" aria-label={label} title={label}>
+  return <span className={`pixel-actor variant-${identity.seed % 4} ${identity.classLayer} ${animation} ${facing === 'left' ? 'face-left' : ''} ${compact ? 'compact' : ''} ${className}`.trim()} role="img" aria-label={label} title={label}>
     <i className="pixel-actor-sprite" style={style} />
     <i className="actor-equipment" aria-hidden="true" />
   </span>;

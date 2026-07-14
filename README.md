@@ -30,6 +30,13 @@ Imagem (opcional):
 - `IMAGE_MODEL`: opcional; padrão `gpt-image-1`.
 - `IMAGE_ESTIMATED_COST_USD`: custo estimado por imagem para telemetria local.
 
+Banco visual global incremental:
+
+- `BLOB_READ_WRITE_TOKEN`: Vercel Blob público para os arquivos de imagem.
+- `UPSTASH_REDIS_REST_URL` e `UPSTASH_REDIS_REST_TOKEN`: índice global, metadados, deduplicação, linhagens e cotas.
+- `GLOBAL_VISUAL_DAILY_LIMIT_PER_CAMPAIGN`: limite diário de novas derivações por campanha; padrão `4`.
+- Sem essas três credenciais, o jogo mantém os atlas locais e continua funcionando normalmente, mas não publica novidades entre jogadores.
+
 Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o turno. Um circuit breaker interrompe tentativas repetidas e o jogador recebe imediatamente o melhor asset local ou o fallback estático.
 
 ## Memória narrativa e estado v8
@@ -63,16 +70,32 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 - O LLM interpreta e sugere `worldDelta`; somente a Engine valida e aplica dano, cura, mana, dinheiro, reputação, locais, NPCs, itens, objetivos e magias.
 - `lib/magic/magic-engine.ts` normaliza magias procedurais por nível, controla mana, cooldown, dano, cura e efeitos ativos.
 - O mapa aceita tipos emergentes de local, preserva conexões, visita, estado, presença de NPCs e um único local atual.
+- A campanha nasce em `Local desconhecido`. Procurar uma cidade não cria um assentamento automaticamente: um local só entra no mapa quando a consequência narrativa o descobre e cita seu nome.
+- A gênese não cria NPCs. Pessoas persistentes surgem incrementalmente apenas quando uma ação do jogador as coloca na narrativa; nome, memória, relação, localização e identidade visual passam então a acompanhar a campanha.
+- Saves antigos são higienizados de resíduos da campanha protótipo, incluindo Mara Vell e os antigos nomes fixos.
 - HP, mana e energia têm limites persistidos e a HUD lê diretamente o save.
 
 ## Identidade visual persistente
 
 - `lib/visual/sprite-system.ts` cria e migra uma identidade determinística para jogador e NPCs importantes sem regenerá-los a cada cena.
 - `public/assets/hero-sprite-sheet-v1.png` contém idle, caminhada, ataque, magia, conversa, celebração, dano, morte e ações de mundo.
+- O jogador não informa mais uma aparência impossível de garantir: cada campanha sorteia uma variação de paleta, silhueta e equipamento, depois a mantém no save.
 - `public/assets/world-scene-atlas-v1.png` oferece oito ambientes originais reutilizáveis: vila, taverna, floresta, rio, mina, castelo, loja e montanha.
+- `public/assets/intro-scene-atlas-v2.png` substitui os antigos polígonos da abertura por quatro cenários integralmente desenhados em pixel art.
+- `public/assets/item-icon-atlas-v1.png` contém 32 ícones contextuais; `components/ItemIcon.tsx` escolhe o quadro pelo nome e pela categoria do item.
 - `components/LayeredWorldScene.tsx` compõe fundo, iluminação por horário, clima, objetos animados, NPCs e jogador em câmera fixa.
 - O mesmo sprite aparece no menu, cutscene, HUD e mundo. Classe, descrição e personalidade ficam persistidas no save v8.
 - A interface usa paleta natural, superfícies opacas, molduras de madeira/pedra e tipografia pixel; não depende de neon, vidro ou efeitos futuristas.
+
+### Evolução visual compartilhada
+
+- `lib/visual/global-visual-registry.ts` armazena arquivos no Vercel Blob e metadados no índice REST global.
+- Todo asset derivado registra `parentAssetId`, `rootAssetId`, `lineageGeneration`, `semanticKey`, campanha de origem e influência do prompt do jogador.
+- O prompt inicial determina a primeira derivação do personagem. A classe, personalidade e história possuem prioridade explícita sobre o asset-base.
+- Itens sem ícone específico procuram uma criação global antes de derivar um novo ícone do atlas original.
+- Ações sem animação conhecida podem derivar dois novos frames do sprite atual e salvá-los como uma folha de movimento global.
+- Cenários continuam usando composição local imediatamente; durante o ciclo ilustrado, o sistema procura uma cena global e deriva do melhor pai apenas quando necessário.
+- Locks semânticos impedem duas campanhas de gerar o mesmo asset simultaneamente, e cotas evitam crescimento/custo descontrolado.
 
 ## Ciclo visual persistente
 
@@ -114,6 +137,10 @@ O modelo pode apenas sugerir `worldDelta.items`. A Engine exige que o nome apare
 
 ### Interface
 
+- `app/portable.css` define o Design System mobile-first oficial: tokens de cor, espaçamento 4/8/12/16/24, bordas, sombras, tipografia, controles e estados.
+- Mobile e desktop usam a mesma pilha visual: Header → Cena → Narrativa → Consequências → Ação. O desktop limita o jogo a 680 px e usa as laterais apenas como atmosfera.
+- Inventário, mapa, objetivos, ficha e diário vivem no mesmo drawer em qualquer resolução; não existe HUD lateral exclusiva do desktop.
+- A cena ocupa aproximadamente 38% da altura útil, narrativa e consequências possuem rolagem interna limitada, e a ação permanece ao alcance na base da composição.
 - Logo do menu reduzido aproximadamente 25%, sem alterar proporção.
 - Pequenos atores pixel art ambientam o menu com caminhada, magia, leitura e um companheiro; os duelistas foram removidos.
 - A cutscene clássica de doze segundos, com amanhecer, viagem, vila, portal, logo e trilha procedural, foi restaurada. `PULAR` permanece sempre disponível.
@@ -131,7 +158,9 @@ O modelo pode apenas sugerir `worldDelta.items`. A Engine exige que o nome apare
 - `components/SceneVisual.tsx`: consulta cache, gera sem bloquear e aplica fallback.
 - `components/AdminVisualDashboard.tsx`: assets, cache hit, confiança, custos, falhas e sanitizações.
 
-O banco atual é compartilhado por todas as campanhas no mesmo navegador. Para compartilhamento global entre jogadores, o repositório foi isolado atrás do serviço e pode ser conectado posteriormente a um storage persistente (Vercel Blob/S3 + banco de metadados) sem alterar a HUD ou a Engine.
+Com `BLOB_READ_WRITE_TOKEN` e as credenciais REST do Upstash configuradas, assets aprovados são compartilhados globalmente entre jogadores. Cada asset registra pai, raiz e geração da linhagem; o IndexedDB continua sendo o cache local e o modo resiliente.
+
+Campanhas com conteúdo sexual explícito, violência gráfica, ódio/extremismo ou crueldade destrutiva severa passam automaticamente para `local-only`. A história e o save continuam no navegador, mas nenhuma imagem, ícone, animação, prompt ou metadado dessa campanha é incorporado ao acervo global. Esse isolamento não tenta contornar as políticas próprias dos provedores externos.
 
 ## Logo oficial
 

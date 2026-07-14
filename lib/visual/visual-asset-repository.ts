@@ -30,17 +30,32 @@ function requestResult<T>(request: IDBRequest<T>) {
 }
 
 export async function listVisualAssets(): Promise<VisualAsset[]> {
-  if (typeof indexedDB === 'undefined') return [];
-  const db = await openDatabase();
-  try { return await requestResult(db.transaction(ASSET_STORE, 'readonly').objectStore(ASSET_STORE).getAll()) as VisualAsset[]; }
-  finally { db.close(); }
+  let local: VisualAsset[] = [];
+  if (typeof indexedDB !== 'undefined') {
+    const db = await openDatabase();
+    try { local = await requestResult(db.transaction(ASSET_STORE, 'readonly').objectStore(ASSET_STORE).getAll()) as VisualAsset[]; }
+    finally { db.close(); }
+  }
+  try {
+    const response = await fetch('/api/visual-library?limit=180', { cache: 'no-store' });
+    const payload = await response.json() as { assets?: VisualAsset[] };
+    const merged = new Map(local.map(asset => [asset.id, asset]));
+    for (const asset of payload.assets || []) merged.set(asset.id, asset);
+    return Array.from(merged.values());
+  } catch { return local; }
 }
 
 export async function getVisualAsset(id: string): Promise<VisualAsset | null> {
-  if (typeof indexedDB === 'undefined' || !id) return null;
-  const db = await openDatabase();
-  try { return (await requestResult(db.transaction(ASSET_STORE, 'readonly').objectStore(ASSET_STORE).get(id)) as VisualAsset | undefined) || null; }
-  finally { db.close(); }
+  if (!id) return null;
+  if (typeof indexedDB !== 'undefined') {
+    const db = await openDatabase();
+    try {
+      const local = (await requestResult(db.transaction(ASSET_STORE, 'readonly').objectStore(ASSET_STORE).get(id)) as VisualAsset | undefined) || null;
+      if (local) return local;
+    } finally { db.close(); }
+  }
+  try { const response = await fetch(`/api/visual-library?id=${encodeURIComponent(id)}`, { cache: 'no-store' }); const payload = await response.json() as { asset?: VisualAsset }; return payload.asset || null; }
+  catch { return null; }
 }
 
 export async function saveVisualAsset(asset: VisualAsset) {
@@ -52,6 +67,7 @@ export async function saveVisualAsset(asset: VisualAsset) {
 export async function markVisualAssetReused(asset: VisualAsset) {
   const updated = { ...asset, reuseCount: asset.reuseCount + 1, lastUsedAt: new Date().toISOString() };
   await saveVisualAsset(updated);
+  if (asset.global) void fetch('/api/visual-library', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ reuseId: asset.id }) }).catch(() => undefined);
   return updated;
 }
 

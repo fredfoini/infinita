@@ -1,8 +1,8 @@
-export type SpriteAnimation = 'idle' | 'walk' | 'attack' | 'cast' | 'talk' | 'celebrate' | 'hurt' | 'death' | 'run' | 'fishing' | 'craft' | 'sit' | 'sleep';
+export type SpriteAnimation = 'idle' | 'walk' | 'attack' | 'cast' | 'talk' | 'celebrate' | 'hurt' | 'death' | 'run' | 'fishing' | 'craft' | 'sit' | 'sleep' | 'custom';
 
 export type SpriteIdentity = {
   id: string;
-  sheetUrl: '/assets/hero-sprite-sheet-v1.png';
+  sheetUrl: string;
   seed: number;
   hue: number;
   saturation: number;
@@ -10,6 +10,8 @@ export type SpriteIdentity = {
   classLayer: 'blade' | 'focus' | 'bow' | 'tool' | 'travel';
   description: string;
   version: 1;
+  sourceAssetId?: string;
+  lineageGeneration?: number;
 };
 
 export const SPRITE_FRAMES: Record<SpriteAnimation, Array<{ column: number; row: number }>> = {
@@ -26,6 +28,7 @@ export const SPRITE_FRAMES: Record<SpriteAnimation, Array<{ column: number; row:
   craft: [{ column: 4, row: 2 }, { column: 5, row: 2 }],
   sit: [{ column: 6, row: 2 }],
   sleep: [{ column: 7, row: 2 }],
+  custom: [{ column: 2, row: 2 }, { column: 3, row: 2 }],
 };
 
 function hash(value: string) {
@@ -49,9 +52,9 @@ export function createSpriteIdentity(input: { id: string; name: string; classNam
     id: `sprite-${input.id}`,
     sheetUrl: '/assets/hero-sprite-sheet-v1.png',
     seed,
-    hue: (seed % 67) - 33,
-    saturation: 82 + (seed % 25),
-    brightness: 90 + (seed % 16),
+    hue: (seed % 101) - 50,
+    saturation: 78 + (seed % 35),
+    brightness: 88 + (seed % 20),
     classLayer: classLayer(input.className),
     description: [input.appearance, input.personality, input.className].filter(Boolean).join(' · ').slice(0, 220),
     version: 1,
@@ -78,7 +81,7 @@ export function animationForAction(action: string, success?: boolean, hp = 1): S
   if (/convers|falo|digo|pergunt|negoci|flert/.test(value)) return 'talk';
   if (/sent|descans/.test(value)) return 'sit';
   if (/dorm|sono/.test(value)) return 'sleep';
-  return 'idle';
+  return action.trim() ? 'custom' : 'idle';
 }
 
 export const SpriteSystem = { create: createSpriteIdentity, migrate: migrateSpriteIdentity, animationForAction, frames: SPRITE_FRAMES };

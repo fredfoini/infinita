@@ -14,7 +14,7 @@ export default function Logo({ variant = 'menu', priority = false, className = '
     alt="INFINITA RPG"
     width={1254}
     height={1254}
-    sizes={variant === 'header' ? '64px' : variant === 'menu' ? '(max-width: 800px) 76vw, 430px' : '(max-width: 800px) 82vw, 520px'}
+    sizes={variant === 'header' ? '(max-width: 720px) 92px, 112px' : variant === 'menu' ? '(max-width: 800px) 76vw, 430px' : '(max-width: 800px) 82vw, 520px'}
     priority={priority}
     unoptimized
     onError={() => { console.error('INFINITA: asset oficial /assets/logo.png não foi encontrado.'); setFailed(true); }}

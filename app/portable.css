@@ -1,0 +1,118 @@
+/* INFINITA Portable UI — uma composição mobile-first compartilhada por todas as telas. */
+:root{
+  --ui-ink:#27281f;
+  --ui-ink-soft:#585845;
+  --ui-paper:#f3edcf;
+  --ui-paper-deep:#ddd5ae;
+  --ui-panel:#e7dfbd;
+  --ui-frame:#34382d;
+  --ui-frame-dark:#171d18;
+  --ui-line:#726c54;
+  --ui-bronze:#aa8746;
+  --ui-gold:#dfc16a;
+  --ui-green:#4f6848;
+  --ui-green-dark:#324631;
+  --ui-danger:#9d4c43;
+  --ui-space-1:4px;
+  --ui-space-2:8px;
+  --ui-space-3:12px;
+  --ui-space-4:16px;
+  --ui-space-6:24px;
+  --ui-border:3px;
+  --ui-shadow:inset 0 0 0 2px #b8a778,0 5px 0 #151a15;
+}
+
+html{min-height:100%;background:var(--ui-frame-dark)}
+body{min-width:320px;overflow-x:hidden;background:var(--ui-frame-dark);color:var(--ui-ink)}
+main.game-screen{position:relative;isolation:isolate;display:block;min-height:100dvh;padding:var(--ui-space-2);background:#20281f}
+.game-screen:before{content:"";position:fixed;z-index:-2;inset:-26px;background:linear-gradient(#17201999,#172019cc),url('/assets/world-scene-atlas-v1.png') center/cover no-repeat;filter:blur(14px) saturate(.65);transform:scale(1.08)}
+.game-screen:after{content:"";position:fixed;z-index:-1;inset:0;pointer-events:none;background:radial-gradient(circle at 18% 20%,#d4b85b1c 0 2px,transparent 3px),radial-gradient(circle at 82% 68%,#d4b85b17 0 2px,transparent 3px),linear-gradient(90deg,#101510b8,transparent 28%,transparent 72%,#101510b8);background-size:74px 74px,91px 91px,auto}
+.game-screen .console-label{display:none}
+
+.game-screen .shell{position:relative;display:flex;flex-direction:column;width:min(100%,680px);min-height:calc(100dvh - 16px);margin:0 auto;padding:var(--ui-space-2);overflow:visible;border:5px solid var(--ui-frame);border-radius:14px;background:#756c52;box-shadow:0 0 0 2px #b7a573,0 0 0 7px #181e19,0 18px 50px #080b08cc}
+.game-screen .shell:before{display:none}
+.game-screen .grid,.game-screen .adventure{display:contents}
+
+.portable-header{order:0;position:sticky;z-index:35;top:var(--ui-space-2);display:flex;align-items:center;justify-content:space-between;min-height:60px;padding:var(--ui-space-2) var(--ui-space-3);gap:var(--ui-space-2);border:var(--ui-border) solid var(--ui-frame);background:linear-gradient(#e7dfbd,#d6cba4);box-shadow:inset 0 -3px #9e9069}
+.portable-brand{display:flex;align-items:center;gap:var(--ui-space-2);width:clamp(86px,22%,118px);min-width:86px}
+.power-pixel{position:relative;flex:0 0 10px;width:10px;height:10px;border:2px solid #5b3127;border-radius:50%;background:#e54d32;box-shadow:0 0 0 2px #b58a55,0 0 8px #f05b38}
+.official-logo-header{width:clamp(70px,18vw,98px)!important;height:42px!important;max-width:100%;margin:0!important;object-fit:contain;object-position:left center}
+.portable-header .header-status{display:flex;align-items:center;justify-content:flex-end;gap:var(--ui-space-2);min-width:0}
+.campaign-clock{max-width:170px;overflow:hidden;color:#4c493a;font:6px/1.45 'Press Start 2P';text-align:right;text-overflow:ellipsis;white-space:nowrap}
+.game-screen .audio-toggle,.game-screen .mobile-menu-toggle{display:block;min-width:58px;min-height:38px;padding:var(--ui-space-2);border:2px solid var(--ui-frame);border-radius:4px;background:#686451;color:#fff5ce;box-shadow:inset 0 -3px #3a3b31;font:7px 'Press Start 2P'}
+.game-screen .mobile-menu-toggle{background:var(--ui-green)}
+
+.game-screen .scene{order:1;position:relative;width:100%;height:clamp(250px,38svh,390px);aspect-ratio:auto;overflow:hidden;border:var(--ui-border) solid var(--ui-frame);border-top:0;background:#17231b;image-rendering:pixelated}
+.game-screen .scene-name{left:var(--ui-space-3);bottom:var(--ui-space-3);max-width:calc(100% - 24px);padding:7px 9px;overflow:hidden;border:2px solid #b49351;background:#20291fe8;color:#f4e8bd;font:7px 'Press Start 2P';text-overflow:ellipsis;text-shadow:none;white-space:nowrap}
+.game-screen .scene-vignette{border:2px solid #242b23;box-shadow:inset 0 0 0 2px #a99361,inset 0 -30px 40px #10181044}
+
+.game-screen .narrative{order:2;position:relative;min-height:180px;max-height:clamp(210px,28svh,280px);padding:var(--ui-space-6);overflow-y:auto;border:var(--ui-border) solid var(--ui-frame);border-top:0;background:var(--ui-paper);box-shadow:inset 0 0 0 2px #fff9dc;color:var(--ui-ink);font:clamp(21px,4.8vw,27px)/1.24 VT323,monospace;white-space:pre-line;scrollbar-color:#8c8364 #ddd5ae}
+.game-screen .narrative:after{content:"";position:absolute;pointer-events:none;inset:8px;border:1px solid #b7aa80}
+.game-screen .narrative>*{position:relative;z-index:1}
+.game-screen .tutorial-tip{margin-top:var(--ui-space-4);padding:var(--ui-space-2) var(--ui-space-3);border:0;border-left:4px solid var(--ui-bronze);background:#e4dcb8;color:#615d49;font:6px/1.65 'Press Start 2P'}
+.game-screen .roll-result{margin-top:var(--ui-space-4);padding:var(--ui-space-3);font:7px/1.6 'Press Start 2P'}
+
+.game-screen .events{order:3;max-height:126px;padding:var(--ui-space-3) var(--ui-space-4);overflow-y:auto;border:var(--ui-border) solid var(--ui-frame);border-top:0;background:var(--ui-paper-deep);box-shadow:inset 0 0 0 2px #eee6c5}
+.game-screen .events h3{margin:0 0 var(--ui-space-2);color:#3f513d;font:7px 'Press Start 2P';letter-spacing:.4px}
+.game-screen .events p{display:grid;grid-template-columns:18px minmax(0,1fr);gap:var(--ui-space-2);align-items:start;margin:4px 0;padding:3px 0;border:0;color:var(--ui-ink-soft);font:17px/1.05 VT323}
+.game-screen .events p i{color:var(--ui-green);font-style:normal;text-align:center}.game-screen .events p span{min-width:0}.game-screen .events .combat i,.game-screen .events .failure i{color:var(--ui-danger)}.game-screen .events .xp i,.game-screen .events .level i{color:#8a6b27}
+
+.game-screen .action-form{order:4;position:sticky;z-index:34;bottom:var(--ui-space-2);padding:var(--ui-space-3) var(--ui-space-4) var(--ui-space-4);border:var(--ui-border) solid var(--ui-frame);border-top:0;background:#d7cfaa;box-shadow:inset 0 0 0 2px #eee5c4,0 -6px 18px #19201833}
+.game-screen .action-form label{margin:0 0 var(--ui-space-2);color:#2f392f;font:7px/1.5 'Press Start 2P';letter-spacing:.5px}
+.game-screen .input-row{display:grid;grid-template-columns:minmax(0,1fr) 94px;gap:var(--ui-space-2)}
+.game-screen .action-form input{width:100%;height:52px;padding:8px 12px;border:2px solid var(--ui-frame);border-radius:2px;background:#fff8d8;color:var(--ui-ink);box-shadow:inset 3px 3px #d7cea9;font:23px VT323;outline:0}
+.game-screen .action-form input:focus{border-color:var(--ui-bronze);box-shadow:inset 3px 3px #d7cea9,0 0 0 2px #d1b760}
+.game-screen button{transition:transform .08s ease,filter .08s ease,background-color .08s ease;touch-action:manipulation}
+.game-screen button:hover{filter:brightness(1.08);transform:translateY(-1px)}.game-screen button:active{filter:brightness(.92);transform:translateY(2px)}.game-screen button:focus-visible{outline:3px solid var(--ui-gold);outline-offset:2px}
+.game-screen .action-form .input-row button,.game-screen .roll-only{min-height:52px;padding:var(--ui-space-2);border:2px solid var(--ui-frame);border-radius:4px;background:var(--ui-green);color:#fff7d5;box-shadow:inset 0 -4px var(--ui-green-dark);font:8px 'Press Start 2P'}
+.game-screen .roll-request{gap:var(--ui-space-2)}.game-screen .roll-request small{border:1px solid #94896a;background:#e8dfbc;color:#484737;font:6px/1.6 'Press Start 2P'}
+
+.game-screen footer{display:none}
+
+.game-screen aside{position:fixed;z-index:80;top:var(--ui-space-4);right:max(var(--ui-space-4),calc((100vw - 700px)/2));bottom:var(--ui-space-4);display:block;width:min(92vw,420px);max-height:none;padding:var(--ui-space-4);overflow-y:auto;border:4px solid var(--ui-frame);background:var(--ui-panel);box-shadow:0 0 0 3px #b6a676,-12px 14px 35px #0b0e0bcc;transform:translateX(calc(100% + 40px));transition:transform .18s steps(4)}
+.game-screen aside.drawer-open{transform:translateX(0)}
+.game-screen .drawer-close{display:block;width:100%;min-height:40px;margin-bottom:var(--ui-space-2);background:var(--ui-frame);font-size:7px}
+.game-screen .panel-tabs{position:sticky;z-index:2;top:0;grid-template-columns:repeat(3,1fr);gap:var(--ui-space-1);padding:var(--ui-space-2) 0;background:var(--ui-panel)}
+.game-screen .panel-tabs button{min-height:40px;font-size:6px}
+
+@media(min-width:720px){
+  main.game-screen{padding:var(--ui-space-6)}
+  .game-screen .shell{min-height:calc(100dvh - 48px);padding:var(--ui-space-3);border-width:7px;border-radius:18px}
+  .portable-header{top:var(--ui-space-3)}
+  .game-screen .scene{height:clamp(290px,38svh,390px)}
+  .game-screen .narrative{font-size:27px}
+}
+
+@media(max-width:520px){
+  main.game-screen{padding:0}
+  .game-screen .shell{min-height:100dvh;padding:0;border-width:0;border-radius:0;box-shadow:none}
+  .portable-header{top:0;min-height:58px;border-width:0 0 3px;padding:var(--ui-space-2)}
+  .portable-brand{width:94px}.official-logo-header{width:72px!important;height:40px!important}
+  .campaign-clock{display:none}
+  .game-screen .audio-toggle,.game-screen .mobile-menu-toggle{min-width:57px;min-height:38px;font-size:6px}
+  .game-screen .scene{height:clamp(235px,37svh,360px);border-width:0 0 3px}
+  .game-screen .narrative{min-height:175px;max-height:28svh;padding:var(--ui-space-4);border-width:0 0 3px;font-size:22px}
+  .game-screen .narrative:after{inset:6px}
+  .game-screen .events{max-height:112px;padding:var(--ui-space-3);border-width:0 0 3px}
+  .game-screen .events p{font-size:16px}
+  .game-screen .action-form{bottom:0;padding:var(--ui-space-2) var(--ui-space-3) var(--ui-space-3);border-width:0;border-top:3px solid var(--ui-frame)}
+  .game-screen .input-row{grid-template-columns:minmax(0,1fr) 84px}
+  .game-screen .action-form input{height:50px;font-size:21px}.game-screen .action-form .input-row button{font-size:7px}
+  .game-screen footer{display:none}
+  .game-screen aside{inset:8px;width:auto}
+}
+
+@media(max-height:700px){
+  .game-screen .scene{height:34svh;min-height:210px}
+  .game-screen .narrative{max-height:25svh;min-height:150px}
+  .game-screen .events{max-height:82px}
+}
+
+@media(prefers-reduced-motion:reduce){.game-screen button,.game-screen aside{transition:none}.game-screen:after{display:none}}
+
+/* O menu usa a mesma escala portátil; desktop ganha respiro, não uma interface paralela. */
+main.premium-menu{padding:var(--ui-space-3)}
+.premium-menu .game-menu{width:min(100%,680px);margin:auto;padding:clamp(18px,5vw,36px)}
+.premium-menu .menu-fields{grid-template-columns:1fr}
+.premium-menu .class-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+@media(max-width:370px){.premium-menu .class-grid{grid-template-columns:1fr}}

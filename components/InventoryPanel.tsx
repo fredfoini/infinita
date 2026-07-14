@@ -3,6 +3,7 @@
 import { memo } from 'react';
 import type { Item } from '@/lib/engine';
 import type { ItemAction } from '@/lib/items/item-engine';
+import ItemIcon from '@/components/ItemIcon';
 
 const CATEGORY_LABEL: Record<Item['category'], string> = {
   consumable: 'CONSUMÍVEL', tool: 'FERRAMENTA', weapon: 'ARMA', armor: 'ARMADURA', accessory: 'ACESSÓRIO', material: 'MATERIAL',
@@ -23,11 +24,11 @@ function availableActions(item: Item, hasNearbyNpc: boolean): Array<{ action: It
   return actions;
 }
 
-function InventoryPanel({ items, busy, hasNearbyNpc, onAction }: { items: Item[]; busy: boolean; hasNearbyNpc: boolean; onAction: (itemId: string, action: ItemAction) => void }) {
+function InventoryPanel({ items, campaignId, localOnly, busy, hasNearbyNpc, onAction }: { items: Item[]; campaignId: string; localOnly: boolean; busy: boolean; hasNearbyNpc: boolean; onAction: (itemId: string, action: ItemAction) => void }) {
   return <section className="side-panel inventory-panel"><h3>INVENTÁRIO · {items.length} ITENS</h3>
     {items.length === 0 && <p className="rep">A mochila está vazia. Itens perdidos e destruídos continuam registrados na história do mundo.</p>}
     <div className="inventory-list">{items.map(item => <details className={`inventory-item rarity-${item.rarity}`} key={item.id}>
-      <summary><span className="item-icon">{item.category === 'weapon' ? '⚔' : item.category === 'armor' ? '◆' : item.category === 'consumable' ? '✚' : item.category === 'key' ? '⌘' : '◇'}</span><span><b>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</b><small>{RARITY_LABEL[item.rarity]} · {CATEGORY_LABEL[item.category]} {item.equipped ? '· EQUIPADO' : ''}</small></span><em>{Number((item.weight * item.quantity).toFixed(2))} kg</em></summary>
+      <summary><ItemIcon item={item} campaignId={campaignId} localOnly={localOnly}/><span><b>{item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</b><small>{RARITY_LABEL[item.rarity]} · {CATEGORY_LABEL[item.category]} {item.equipped ? '· EQUIPADO' : ''}</small></span><em>{Number((item.weight * item.quantity).toFixed(2))} kg</em></summary>
       <p>{item.description}</p>
       <div className="item-meta"><span>VALOR {item.value} G</span><span>ESTADO {item.state.toUpperCase()}</span>{item.durability && <span>DURABILIDADE {item.durability.current}/{item.durability.max}</span>}</div>
       <ul className="item-effects">{item.effects.mechanical.map((effect, index) => <li key={`${effect.type}-${index}`}>◆ {effect.target || effect.type.replaceAll('_', ' ')} {effect.value > 1 ? `+${effect.value}` : ''}</li>)}</ul>
@@ -36,4 +37,4 @@ function InventoryPanel({ items, busy, hasNearbyNpc, onAction }: { items: Item[]
   </section>;
 }
 
-export default memo(InventoryPanel, (previous, next) => previous.items === next.items && previous.busy === next.busy && previous.hasNearbyNpc === next.hasNearbyNpc);
+export default memo(InventoryPanel, (previous, next) => previous.items === next.items && previous.campaignId === next.campaignId && previous.localOnly === next.localOnly && previous.busy === next.busy && previous.hasNearbyNpc === next.hasNearbyNpc);

@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import './globals.css';
+import './portable.css';
 
 export const metadata: Metadata = { title: 'INFINITA', description: 'Uma campanha que nunca termina.' };
 

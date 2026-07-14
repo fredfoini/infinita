@@ -1,6 +1,7 @@
 export type VisualIntensity = 'low' | 'medium' | 'high';
 export type VisualSafetyClass = 'safe' | 'sanitized';
 export type ModerationMode = 'direct' | 'sanitized' | 'neutral_fallback' | 'reject';
+export type VisualAssetKind = 'scene' | 'item-icon' | 'character-sheet' | 'motion-sheet' | 'style-reference';
 
 export type SceneVisualDescriptor = {
   campaignId: string;
@@ -20,6 +21,8 @@ export type SceneVisualDescriptor = {
   importantObjects: string[];
   safetyClass: VisualSafetyClass;
   visualSummary: string;
+  playerPromptInfluence?: string;
+  characterVisualIdentity?: string;
 };
 
 export type ModerationResult = {
@@ -53,6 +56,13 @@ export type VisualAsset = {
   perceptualHash?: string;
   semanticEmbedding?: number[];
   sceneDescriptorSnapshot: SceneVisualDescriptor;
+  assetKind?: VisualAssetKind;
+  semanticKey?: string;
+  parentAssetId?: string;
+  rootAssetId?: string;
+  lineageGeneration?: number;
+  playerPromptInfluence?: string;
+  global?: boolean;
 };
 
 export type VisualMatch = { asset: VisualAsset | null; confidence: number; scoreBreakdown?: Record<string, number> };

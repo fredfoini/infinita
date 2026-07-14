@@ -200,6 +200,8 @@ export type GameState = {
     premise: string;
     conflict: string;
     originPrompt: string;
+    sharingMode?: import('@/lib/content-sharing-policy').CampaignSharingMode;
+    sharingReason?: import('@/lib/content-sharing-policy').GlobalContributionDecision['reason'];
     chapter: number;
     quests: Quest[];
     opportunities: string[];
@@ -322,6 +324,19 @@ const now = () => new Date().toISOString();
 const uid = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clean = (value: string, max = 240) => value.trim().replace(/\s+/g, ' ').slice(0, max);
+const LEGACY_LORE = /\b(?:Mara Vell|Norwich|Valedouro|Terras do Vale)\b/i;
+const GENERIC_LOCATION = /^(?:assentamento|ponto de origem|estabelecimento local|área selvagem|curso de água|estrutura antiga|caminho aberto|local atual)$/i;
+
+export function isLegacyLore(value: string) { return LEGACY_LORE.test(String(value || '')); }
+export function sanitizeLegacyLoreText(value: string) {
+  return String(value || '')
+    .replace(/\bMara Vell\b/gi, 'uma pessoa desconhecida')
+    .replace(/\b(?:Norwich|Valedouro|Terras do Vale|Assentamento)\b/gi, 'local desconhecido');
+}
+function emergentLocationName(value: string) {
+  const name = clean(sanitizeLegacyLoreText(value || ''), 80);
+  return !name || GENERIC_LOCATION.test(name) ? 'Local desconhecido' : name;
+}
 const hash = (value: string) => Array.from(value).reduce((sum, char) => ((sum << 5) - sum + char.charCodeAt(0)) | 0, 0) >>> 0;
 const aiContextCache = new Map<string, ReturnType<typeof buildAiContextUncached>>();
 const defaultVisualIdentity = (kind: Location['kind'], description = ''): Location['visualIdentity'] => ({
@@ -442,7 +457,7 @@ export function createInitialState(input: NewCampaignInput): GameState {
     Arcana: makeSkill('Arcana', 'Inteligência', template.primary === 'Arcana', campaignId, characterId),
     Atletismo: makeSkill('Atletismo', 'Força', false, campaignId, characterId),
   };
-  const originLocation = locationRecord({ campaignId }, { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Ponto de Origem', region: clean(`Região de ${input.campaignName}`, 80), kind: 'wild', description: clean(input.openingPrompt, 500), discovered: true, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) });
+  const originLocation = locationRecord({ campaignId }, { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Local desconhecido', region: 'Região desconhecida', kind: 'wild', description: clean(input.openingPrompt, 500), discovered: false, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) });
   originLocation.current = true;
   const ownerId = clean(input.characterName, 60);
   const initialItems = [
@@ -458,14 +473,15 @@ export function createInitialState(input: NewCampaignInput): GameState {
       premise: opening.premise,
       conflict: opening.conflict,
       originPrompt: clean(input.openingPrompt, 700),
+      sharingMode: 'global',
       chapter: 1,
       quests: [],
       opportunities: [],
       memory: createMemoryState(input.openingPrompt, opening.premise, createdAt),
     },
     character: {
-      name: clean(input.characterName, 60), className: clean(input.className, 80), personality: clean(input.personality || 'Personalidade revelada pelas escolhas.', 180), appearanceDescription: clean(input.appearanceDescription || `Viajante ${input.className.toLowerCase()} de silhueta marcante.`, 220),
-      sprite: createSpriteIdentity({ id: campaignId, name: input.characterName, className: input.className, personality: input.personality, appearance: input.appearanceDescription, story: input.openingPrompt }), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
+      name: clean(input.characterName, 60), className: clean(input.className, 80), personality: clean(input.personality || 'Personalidade revelada pelas escolhas.', 180), appearanceDescription: `Visual sorteado pela Engine para ${clean(input.className, 80)}.`,
+      sprite: createSpriteIdentity({ id: campaignId, name: input.characterName, className: input.className, personality: input.personality, story: input.openingPrompt }), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
       level: 1, xp: 0, xpToNext: xpThreshold(2), attributePoints: 0, attributes,
       hp: template.hp + attributeModifier(attributes.Constituição), maxHp: template.hp + attributeModifier(attributes.Constituição), mana: template.mana, maxMana: template.mana, energy: 10, maxEnergy: 10,
       gold: 12, skills, inventory: initialItems, unlockedActions: [], professions: [opening.profession],
@@ -547,29 +563,6 @@ function pendingFromSelection(selection: ReturnType<typeof selectActionTest>, ac
   };
 }
 
-function inferLocation(action: string, state: GameState): { location: Location; isNew: boolean } | null {
-  const value = action.toLowerCase();
-  const kinds: Array<[RegExp, Location['kind'], string]> = [
-    [/taverna|estalagem/, 'tavern', 'Estabelecimento local'],
-    [/floresta|bosque|selva|mata/, 'forest', 'Área selvagem'],
-    [/rio|riacho|ponte|lago|costa/, 'river', 'Curso de água'],
-    [/ruína|templo|torre|cripta/, 'ruin', 'Estrutura antiga'],
-    [/estrada|trilha|caminho/, 'road', 'Caminho aberto'],
-    [/cidade|vila|aldeia|mercado/, 'city', 'Assentamento'],
-  ];
-  const found = kinds.find(([pattern]) => pattern.test(value));
-  if (!found) return null;
-  const explicit = action.match(/(?:até|para|rumo a|entro em|chego a(?:o| à)?)\s+(?:a|o|uma|um)?\s*([^,.!?]{2,60})/i)?.[1];
-  const name = clean(explicit || found[2], 80).replace(/\b\w/g, char => char.toUpperCase());
-  const region = currentLocation(state).region;
-  const id = `location-${hash(`${region}:${name}`).toString(36)}`;
-  const existing = state.world.locations[id];
-  if (existing) return { location: existing, isNew: false };
-  const description = `Local descoberto pelas ações do jogador: ${clean(action, 220)}`;
-  const location = locationRecord(state, { id, name, region, kind: found[1], description, discovered: true, visualIdentity: defaultVisualIdentity(found[1], description) }, state.session.currentTurnId || 'player-action');
-  return { location, isNew: true };
-}
-
 function progressSkillAfterCheck(state: GameState, pending: PendingRoll, outcome: CheckOutcome, events: GameEvent[]): GameState {
   const existing = Object.values(state.character.skills).find(skill => skill.id === pending.skillId || normalizeSemanticText(skill.name) === normalizeSemanticText(pending.skill));
   if (!existing) return state;
@@ -606,10 +599,12 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
   if (!delta) return inputState;
   let state = structuredClone(inputState);
   const events: GameEvent[] = [];
+  const canonicalNarrative = sanitizeLegacyLoreText(narrative);
+  const normalizedNarrative = normalizeSemanticText(canonicalNarrative);
 
   for (const candidate of (delta.locations || []).slice(0, 4)) {
-    const name = clean(candidate.name || '', 80);
-    if (!name) continue;
+    const name = emergentLocationName(candidate.name || '');
+    if (name === 'Local desconhecido' || isLegacyLore(candidate.name || '') || !normalizedNarrative.includes(normalizeSemanticText(name))) continue;
     const region = clean(candidate.region || currentLocation(state).region, 80);
     const id = `location-${hash(`${region}:${name}`).toString(36)}`;
     const kind = clean(candidate.kind || 'wild', 40).toLowerCase();
@@ -632,7 +627,7 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
 
   for (const candidate of (delta.npcs || []).slice(0, 6)) {
     const name = clean(candidate.name || '', 60);
-    if (!name) continue;
+    if (!name || isLegacyLore(name) || !normalizedNarrative.includes(normalizeSemanticText(name))) continue;
     const id = `npc-${hash(name.toLowerCase()).toString(36)}`;
     const targetLocation = Object.values(state.world.locations).find(location => location.name.toLowerCase() === candidate.locationName?.toLowerCase()) || currentLocation(state);
     const previous = state.world.npcs[id];
@@ -710,7 +705,7 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
   const changes = (delta.worldChanges || []).map(value => clean(value, 260)).filter(Boolean);
   state.world.changes = [...state.world.changes, ...changes].slice(-100);
   for (const change of changes) events.push(makeEvent(state, 'world', change, 'world', 60));
-  const itemResult = registerSuggestedItems(state, delta.items, narrative);
+  const itemResult = registerSuggestedItems(state, delta.items, canonicalNarrative);
   state = itemResult.state;
   for (const item of itemResult.created) events.push(makeEvent(state, 'item', `Item adquirido: ${item.name} (${item.rarity}). ${item.effects.mechanical.map(effect => effect.target || effect.type).join(', ')}.`, 'world', 78));
   const learnedSpells = learnSuggestedSpells(state, delta.spells || []);
@@ -778,18 +773,6 @@ export function beginAction(inputState: GameState, rawAction: string, requestedT
   state.campaign.memory = appendSessionMemory(state.campaign.memory, state.session.turn, `Ação declarada: ${action}`);
   state = advanceClock(state, 1);
   const events: GameEvent[] = [makeEvent(state, 'action', action, 'player', 30, false)];
-  const locationChange = inferLocation(action, state);
-  if (locationChange && locationChange.location.id !== state.world.currentLocationId) {
-    const previous = currentLocation(state);
-    if (previous) { previous.current = false; previous.connectedLocationIds = Array.from(new Set([...previous.connectedLocationIds, locationChange.location.id])); previous.updatedAt = now(); }
-    locationChange.location.current = true;
-    locationChange.location.visited = true;
-    locationChange.location.connectedLocationIds = Array.from(new Set([...locationChange.location.connectedLocationIds, previous?.id].filter(Boolean) as string[]));
-    state.world.locations[locationChange.location.id] = locationChange.location;
-    state.world.currentLocationId = locationChange.location.id;
-    events.push(makeEvent(state, 'world', `Local atual: ${locationChange.location.name}.`, 'world', 60));
-    if (locationChange.isNew) state = grantMilestoneXp(state, 8, 'descoberta de um novo local', events);
-  }
   state = applySocialConsequences(state, action, events);
   const interpretation = interpretPlayerAction(action, state);
   const selection = selectActionTest(state, action, interpretation);
@@ -809,7 +792,7 @@ export function beginAction(inputState: GameState, rawAction: string, requestedT
     events,
     fallbackNarrative: requiresDice
       ? `Sua ação encontra resistência real. O resultado depende de ${state.session.pendingRoll!.attribute} + ${state.session.pendingRoll!.skill} contra CD ${state.session.pendingRoll!.difficulty}.`
-      : `O mundo reage à sua decisão e a situação avança em ${currentLocation(state).name}. O que você faz?`,
+      : `Uma consequência começa a se revelar em ${currentLocation(state).name}. O que você faz?`,
   };
 }
 
@@ -883,7 +866,7 @@ export function resolvePendingRoll(inputState: GameState, forcedDie?: number): {
 }
 
 export function acceptNarrative(state: GameState, narrative: string, memorySummary?: string, memoryUpdate: string[] = [], worldDelta?: NarrativeWorldDelta): GameState {
-  const safeNarrative = clean(narrative, 1800) || state.session.narrative;
+  const safeNarrative = clean(sanitizeLegacyLoreText(narrative), 1800) || sanitizeLegacyLoreText(state.session.narrative);
   const memory = updateNarrativeMemory(state, safeNarrative, memorySummary, memoryUpdate, worldDelta);
   const processedTurnIds = state.session.currentTurnId ? Array.from(new Set([...state.world.processedTurnIds, state.session.currentTurnId])).slice(-120) : state.world.processedTurnIds;
   return updateSave({ ...state, campaign: { ...state.campaign, memory }, world: { ...state.world, processedTurnIds }, session: { ...state.session, narrative: safeNarrative } });
@@ -1018,28 +1001,21 @@ export function buyProduct(inputState: GameState, shopId: string, productId: str
 export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload): GameState {
   const candidate = genesis.initialLocation;
   const fallback = currentLocation(state);
-  const locationName = clean(candidate?.name || fallback.name, 80);
-  const region = clean(candidate?.region || fallback.region, 80);
-  const genesisKind = clean(candidate?.kind || fallback.kind || 'wild', 40).toLowerCase();
+  const locationName = emergentLocationName(candidate?.name || fallback.name);
+  const locationKnown = locationName !== 'Local desconhecido';
+  const region = locationKnown ? clean(sanitizeLegacyLoreText(candidate?.region || fallback.region), 80) : 'Região desconhecida';
+  const genesisKind = locationKnown ? clean(candidate?.kind || fallback.kind || 'wild', 40).toLowerCase() : 'wild';
   const location = locationRecord(state, {
     id: `location-${hash(`${region}:${locationName}`).toString(36)}`,
     name: locationName,
     region,
     kind: genesisKind,
     description: clean(candidate?.description || fallback.description, 400),
-    discovered: true,
+    discovered: locationKnown,
     visualIdentity: { ...defaultVisualIdentity(genesisKind, candidate?.description || fallback.description), ...candidate?.visualIdentity },
   }, 'world-genesis');
   location.current = true;
   const npcs: Record<string, NPC> = {};
-  for (const candidateNpc of (genesis.npcs || []).slice(0, 6)) {
-    const name = clean(candidateNpc.name || '', 60);
-    if (!name) continue;
-    const id = `npc-${hash(name.toLowerCase()).toString(36)}`;
-    const profession = clean(candidateNpc.profession || 'Ocupação desconhecida', 80);
-    const personality = clean(candidateNpc.personality || '', 140);
-    npcs[id] = { id, campaignId: state.campaignId, name, role: clean(candidateNpc.role || 'Pessoa do mundo', 80), personality, goal: clean(candidateNpc.goal || '', 180), goals: [clean(candidateNpc.goal || '', 180)].filter(Boolean), profession, locationId: location.id, relationship: 0, relationships: [], reputationWithPlayer: 0, inventoryIds: [], createdFromEventId: 'world-genesis', knowledge: [], memories: [], status: 'active', memoryProfile: defaultNpcMemory(personality), visualAppearance: { ...defaultAppearance(profession), ...candidateNpc.visualAppearance }, sprite: createSpriteIdentity({ id, name, className: profession, personality, appearance: candidateNpc.visualAppearance?.clothing, story: candidateNpc.goal }) };
-  }
   location.residentNpcIds = Object.keys(npcs);
   location.presentNpcIds = Object.keys(npcs);
   const factions: GameState['world']['factions'] = {};
@@ -1123,9 +1099,19 @@ export function migrateState(value: unknown): GameState | null {
     const current = candidate as any;
     current.schemaVersion = 8;
     current.visualCycle = migrateVisualCycle(current.visualCycle, current.campaignId, 0);
+    current.campaign.sharingMode ||= 'global';
     current.campaign.originPrompt ||= current.character.origin || current.campaign.premise || 'A campanha foi recuperada de uma versão anterior.';
     current.campaign.opportunities ||= [];
     current.campaign.memory = migrateMemory(current.campaign.memory, current.campaign.originPrompt, current.campaign.premise, current.session.turn || 0, current.save?.createdAt || now());
+    current.session.narrative = sanitizeLegacyLoreText(current.session.narrative || '');
+    current.campaign.memory.canon = (current.campaign.memory.canon || []).filter((fact: { text: string }) => !isLegacyLore(fact.text));
+    current.campaign.memory.session = (current.campaign.memory.session || []).filter((fact: { text: string }) => !isLegacyLore(fact.text));
+    current.campaign.memory.campaignSummary.text = sanitizeLegacyLoreText(current.campaign.memory.campaignSummary.text || '');
+    current.campaign.opportunities = (current.campaign.opportunities || []).filter((value: string) => !isLegacyLore(value));
+    current.world.timeline = (current.world.timeline || []).filter((event: GameEvent) => !isLegacyLore(event.text));
+    current.session.events = (current.session.events || []).filter((event: GameEvent) => !isLegacyLore(event.text));
+    current.world.changes = (current.world.changes || []).filter((value: string) => !isLegacyLore(value));
+    current.campaign.quests = (current.campaign.quests || []).filter((quest: Quest) => !isLegacyLore(JSON.stringify(quest)));
     current.world.culture ||= { name: 'Cultura não registrada', values: [], customs: [], notes: 'Migrada de uma campanha anterior.' };
     current.world.changes ||= (current.world.timeline || []).slice(-40).map((event: GameEvent) => event.text);
     current.character.unlockedActions ||= [];
@@ -1202,9 +1188,14 @@ export function migrateState(value: unknown): GameState | null {
     }
     for (const location of Object.values(current.world.locations || {}) as Location[]) {
       location.campaignId ||= current.campaignId; location.visualIdentity ||= defaultVisualIdentity(location.kind, location.description); location.visited ??= location.discovered;
+      if (isLegacyLore(location.name) || GENERIC_LOCATION.test(location.name)) { location.name = 'Local desconhecido'; location.region = 'Região desconhecida'; location.kind = 'wild'; location.discovered = false; }
       location.current = location.id === current.world.currentLocationId; location.status ||= 'active'; location.connectedLocationIds ||= []; location.residentNpcIds ||= []; location.presentNpcIds ||= [];
       location.tags ||= [location.kind]; location.createdFromEventId ||= 'migration'; location.createdAt ||= current.save?.createdAt || now(); location.updatedAt ||= current.save?.updatedAt || now();
     }
+    const legacyNpcIds = (Object.values(current.world.npcs || {}) as NPC[]).filter(npc => isLegacyLore(npc.name)).map(npc => npc.id);
+    for (const id of legacyNpcIds) delete current.world.npcs[id];
+    for (const id of legacyNpcIds) delete current.world.reputation?.individuals?.[id];
+    for (const location of Object.values(current.world.locations || {}) as Location[]) { location.residentNpcIds = location.residentNpcIds.filter(id => !legacyNpcIds.includes(id)); location.presentNpcIds = location.presentNpcIds.filter(id => !legacyNpcIds.includes(id)); }
     for (const npc of Object.values(current.world.npcs || {}) as NPC[]) {
       npc.campaignId ||= current.campaignId; npc.status ||= 'active'; npc.goals ||= [npc.goal].filter(Boolean); npc.relationships ||= []; npc.reputationWithPlayer ??= npc.relationship || 0; npc.inventoryIds ||= []; npc.createdFromEventId ||= 'migration'; npc.memoryProfile ||= defaultNpcMemory(npc.personality); npc.visualAppearance ||= defaultAppearance(npc.profession);
       npc.sprite = migrateSpriteIdentity(npc.sprite, { id: npc.id, name: npc.name, className: npc.profession || npc.role, personality: npc.personality, appearance: [npc.visualAppearance.clothing, npc.visualAppearance.hair].filter(Boolean).join(', '), story: npc.goal });

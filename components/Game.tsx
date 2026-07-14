@@ -9,8 +9,12 @@ import ParchmentWriting from '@/components/ParchmentWriting';
 import PixelActor from '@/components/PixelActor';
 import { createInitialState, currentLocation, migrateState, productPrice, setActiveIllustration, xpProgress, type AttributeKey, type GameState, type NewCampaignInput, type RollResult } from '@/lib/engine';
 import type { ItemAction } from '@/lib/items/item-engine';
+import type { VisualAsset } from '@/lib/visual/types';
+import { applyCampaignSharingDecision } from '@/lib/content-sharing-policy';
+import { cleanNarrativeScaffolding } from '@/lib/narrative-cleaner';
+import PortableGameHeader from '@/components/PortableGameHeader';
+import ConsequencesLog from '@/components/ConsequencesLog';
 
-const AmbientAudio = dynamic(() => import('@/components/AmbientAudio'), { ssr: false });
 const IntroSequence = dynamic(() => import('@/components/IntroSequence'), { ssr: false });
 const SceneVisual = dynamic(() => import('@/components/SceneVisual'), { ssr: false, loading: () => <div className="scene-visual visual-placeholder" /> });
 
@@ -78,6 +82,19 @@ async function api<T>(url: string, body: unknown): Promise<T> {
   return data;
 }
 
+async function evolveCharacterVisual(state: GameState, input: NewCampaignInput) {
+  if (state.campaign.sharingMode === 'local-only') return null;
+  const playerPrompt = `Nome: ${input.characterName}. Classe: ${input.className}. Personalidade: ${input.personality || 'revelada pelas escolhas'}. História criada pelo jogador: ${input.openingPrompt}`.slice(0, 1200);
+  const response = await fetch('/api/visual/evolve', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
+    kind: 'character-sheet', semanticKey: `character-sheet:${state.campaignId}`, campaignId: state.campaignId, playerPrompt,
+    characterVisualIdentity: `${input.characterName}; ${input.className}; ${input.personality || ''}; ${input.openingPrompt}`,
+  }) });
+  if (!response.ok) return null;
+  const payload = await response.json() as { asset?: VisualAsset };
+  if (!payload.asset?.fileUrl) return null;
+  return { ...state, character: { ...state.character, appearanceDescription: `Visual evolutivo criado a partir da história: ${input.openingPrompt.slice(0, 140)}`, sprite: { ...state.character.sprite, sheetUrl: payload.asset.fileUrl, sourceAssetId: payload.asset.id, lineageGeneration: payload.asset.lineageGeneration || 1 } }, save: { ...state.save, revision: state.save.revision + 1, updatedAt: new Date().toISOString() } };
+}
+
 export default function Game() {
   const [campaigns, setCampaigns] = useState<GameState[]>([]);
   const [activeId, setActiveId] = useState<string>();
@@ -88,7 +105,6 @@ export default function Game() {
   const [campaignName, setCampaignName] = useState('');
   const [openingPrompt, setOpeningPrompt] = useState('');
   const [personality, setPersonality] = useState('');
-  const [appearanceDescription, setAppearanceDescription] = useState('');
   const [selectedClass, setSelectedClass] = useState('Explorador');
   const [customClass, setCustomClass] = useState('');
   const [action, setAction] = useState('');
@@ -157,7 +173,7 @@ export default function Game() {
   async function createCampaign(event: FormEvent) {
     event.preventDefault();
     const className = customClass.trim() || selectedClass;
-    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className, openingPrompt: openingPrompt.trim(), personality: personality.trim(), appearanceDescription: appearanceDescription.trim() };
+    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className, openingPrompt: openingPrompt.trim(), personality: personality.trim() };
     if (!input.characterName || !input.campaignName || !input.className || !input.openingPrompt || busy) return;
     setBusy(true);
     setNotice('Criando um mundo para este personagem...');
@@ -167,14 +183,16 @@ export default function Game() {
       setActiveId(result.state.campaignId);
       setMenu(false);
       setIntro(result.state);
-      setNotice(result.warning ? 'Campanha iniciada com a narrativa de segurança.' : 'Campanha criada e salva.');
+      setNotice(result.state.campaign.sharingMode === 'local-only' ? 'Campanha privada neste navegador.' : result.warning ? 'Campanha iniciada com a narrativa de segurança.' : 'Campanha criada e salva.');
+      void evolveCharacterVisual(result.state, input).then(evolved => { if (evolved) { update(evolved); setIntro(currentIntro => currentIntro?.campaignId === evolved.campaignId ? evolved : currentIntro); setNotice('O visual exclusivo do personagem foi incorporado ao banco global.'); } }).catch(() => undefined);
     } catch (error) {
-      const fallback = createInitialState(input);
+      const fallback = applyCampaignSharingDecision(createInitialState(input), input.openingPrompt);
       setCampaigns(list => [...list, fallback]);
       setActiveId(fallback.campaignId);
       setMenu(false);
       setIntro(fallback);
       setNotice(error instanceof Error ? `IA indisponível: ${error.message}. O modo seguro iniciou a campanha.` : 'Campanha iniciada no modo seguro.');
+      void evolveCharacterVisual(fallback, input).then(evolved => { if (evolved) { update(evolved); setIntro(currentIntro => currentIntro?.campaignId === evolved.campaignId ? evolved : currentIntro); } }).catch(() => undefined);
     } finally {
       setBusy(false);
     }
@@ -183,13 +201,13 @@ export default function Game() {
   async function sendTurn(kind: 'action' | 'roll' | 'attribute' | 'useItem' | 'buyItem' | 'itemAction' | 'castSpell', playerAction?: string, extra: Record<string, string> = {}) {
     if (!current || busy) return;
     setBusy(true);
-    setNotice(kind === 'roll' ? 'Os dados estão decidindo a consequência...' : 'O mundo está reagindo...');
+    setNotice('');
     try {
       const requestId = globalThis.crypto?.randomUUID?.() || `${current.campaignId}-${current.save.revision}-${Date.now()}`;
       const reply = await api<TurnReply>('/api/turn', { kind, requestId, action: playerAction, state: current, ...extra });
       if (!reply.state) throw new Error('A Engine não retornou o estado do jogo.');
       update(reply.state);
-      setNotice(reply.warning ? 'Turno concluído pela Engine; o serviço narrativo está temporariamente indisponível.' : reply.mode === 'ai' ? 'Turno salvo.' : 'Turno resolvido pela Engine.');
+      setNotice(reply.state.campaign.sharingMode === 'local-only' ? 'Campanha privada neste navegador.' : reply.mode === 'ai' ? 'Turno salvo.' : 'Progresso salvo localmente.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível concluir o turno. Tente novamente.');
     } finally {
@@ -252,7 +270,7 @@ export default function Game() {
             <label>NOME DO PERSONAGEM<input value={characterName} onChange={event => setCharacterName(event.target.value)} maxLength={60} placeholder="Quem enfrentará o mundo?" /></label>
             <label>NOME DA CAMPANHA<input value={campaignName} onChange={event => setCampaignName(event.target.value)} maxLength={80} placeholder="O nome desta crônica" /></label>
             <label>PERSONALIDADE<input value={personality} onChange={event => setPersonality(event.target.value)} maxLength={180} placeholder="Ex.: curioso, leal e impaciente" /></label>
-            <label>APARÊNCIA<input value={appearanceDescription} onChange={event => setAppearanceDescription(event.target.value)} maxLength={220} placeholder="Ex.: capa curta verde, cabelos escuros, cicatriz discreta" /></label>
+            <div className="random-appearance-note"><b>VISUAL SORTEADO</b><span>A Engine criará um aventureiro aleatório e manterá o mesmo visual durante toda a campanha.</span></div>
           </div>
           <label className="opening-seed">COMO SUA HISTÓRIA COMEÇA?<textarea value={openingPrompt} onChange={event => setOpeningPrompt(event.target.value)} maxLength={700} required placeholder="Ex.: Sou um ferreiro falido. Acordei em um navio pirata. Sou um músico viajante em busca de trabalho..." /><small>Esta situação será a semente de todo o mundo. Não existe campanha principal predefinida.</small></label>
           <label>ARQUÉTIPOS SUGERIDOS</label>
@@ -275,10 +293,7 @@ export default function Game() {
   return <main className="game-screen">
     <div className="console-label">● INFINITA ADVANCE</div>
     <div className="shell">
-      <header>
-        <Logo variant="header" priority/>
-        <div className="header-status"><AmbientAudio location={location?.name || 'Cena Inicial'} /><button type="button" className="mobile-menu-toggle" onClick={() => setDrawerOpen(open => !open)}>MENU</button><small>{current.campaign.name.toUpperCase()} · NÍVEL {current.character.level} · D{current.world.day} · {String(current.world.hour).padStart(2, '0')}:00</small></div>
-      </header>
+      <PortableGameHeader campaignName={current.campaign.name} level={current.character.level} day={current.world.day} hour={current.world.hour} locationName={location?.name || 'Local desconhecido'} onMenu={() => setDrawerOpen(open => !open)}/>
       <div className="grid">
         <section className="adventure">
           <div className="scene generated">
@@ -286,7 +301,7 @@ export default function Game() {
             <div className="scene-name">{location?.name} · {current.world.weather}</div>
           </div>
           <article className="narrative" aria-live="polite">
-            {busy && <span className="thinking">◆</span>}{current.session.narrative}
+            {busy && <span className="thinking">◆</span>}{cleanNarrativeScaffolding(current.session.narrative, current.character.name) || current.session.narrative}
             {lastRoll && <div className={`roll-result ${['partial_success', 'success', 'critical_success'].includes(lastRoll.outcome) ? 'success' : 'failure'}`}>D20 {lastRoll.die} · TOTAL {lastRoll.total} · {OUTCOME_LABEL[lastRoll.outcome] || (lastRoll.success ? 'SUCESSO' : 'FALHA')}</div>}
             {current.session.turn < 2 && <div className="tutorial-tip">Escreva qualquer ação. Quando houver risco, você rolará um dado D20.</div>}
           </article>
@@ -313,17 +328,14 @@ export default function Game() {
             <button type="button" className={panel === 'character' ? 'active' : ''} onClick={() => setPanel('character')}>FICHA</button>
             <button type="button" className={panel === 'journal' ? 'active' : ''} onClick={() => setPanel('journal')}>DIÁRIO</button>
           </nav>
-          {panel === 'inventory' && <InventoryPanel items={current.character.inventory} busy={busy} hasNearbyNpc={Object.values(current.world.npcs).some(npc => npc.locationId === current.world.currentLocationId && npc.status === 'active')} onAction={handleItemAction} />}
+          {panel === 'inventory' && <InventoryPanel items={current.character.inventory} campaignId={current.campaignId} localOnly={current.campaign.sharingMode === 'local-only'} busy={busy} hasNearbyNpc={Object.values(current.world.npcs).some(npc => npc.locationId === current.world.currentLocationId && npc.status === 'active')} onAction={handleItemAction} />}
           {panel === 'character' && <section className="side-panel"><h3>ATRIBUTOS {current.character.attributePoints > 0 && `· ${current.character.attributePoints} PONTO`}</h3><ul>{Object.entries(current.character.attributes).map(([name, value]) => <li key={name}><span>› {name}</span>{current.character.attributePoints > 0 && value < 20 ? <button type="button" className="mini-action" disabled={busy} onClick={() => void sendTurn('attribute', undefined, { attribute: name as AttributeKey })}>+ {value}</button> : <em>{value}</em>}</li>)}</ul><hr /><h3>PERÍCIAS</h3><ul>{Object.values(current.character.skills).filter(skill => skill.trained || skill.xp > 0).slice(0, 8).map(skill => <li key={skill.id}>› {skill.name}<em>{skill.rank}</em></li>)}</ul><hr/><h3>MAGIAS</h3>{current.character.spells.length ? <ul>{current.character.spells.map(spell => <li key={spell.id}><span>› {spell.name}<small>{spell.manaCost} MANA · {spell.currentCooldown ? `RECARGA ${spell.currentCooldown}` : spell.type.toUpperCase()}</small></span><button type="button" className="mini-action" disabled={busy || spell.currentCooldown > 0 || current.character.mana < spell.manaCost} onClick={() => void sendTurn('castSpell', undefined, { spellId: spell.id })}>USAR</button></li>)}</ul> : <p className="rep">Nenhuma magia aprendida.</p>}</section>}
           {panel === 'quests' && <section className="side-panel"><h3>OBJETIVOS EMERGENTES</h3>{current.campaign.quests.length ? current.campaign.quests.map(quest => <article className="quest" key={quest.id}><b>{quest.title}</b><span>{quest.status === 'completed' ? 'CONCLUÍDO' : quest.status === 'active' ? quest.description : quest.status.toUpperCase()}</span>{quest.objectives.map(objective => <small key={objective.id}>{objective.completed ? '✓' : '□'} {objective.text}</small>)}</article>) : <p className="rep">Nenhum objetivo foi imposto. Eles surgirão das suas escolhas.</p>}<hr /><h3>OPORTUNIDADES</h3>{current.campaign.opportunities.length ? current.campaign.opportunities.map(opportunity => <p className="journal-event" key={opportunity}>◇ {opportunity}</p>) : <p className="rep">O mundo ainda está revelando possibilidades.</p>}<hr /><h3>REPUTAÇÃO</h3><p className="rep">{location?.name || 'Local atual'} {current.world.reputation.cities[current.world.currentLocationId] || 0}<br />{location?.region || 'Região'} {current.world.reputation.regions[location?.region || ''] || 0}<br />Moral percebida {current.world.reputation.moral}</p></section>}
           {panel === 'journal' && <section className="side-panel"><h3>MEMÓRIA DA CAMPANHA</h3><p className="journal-summary">{current.campaign.memory.campaignSummary.text}</p><hr/><h3>ÂNCORA NARRATIVA</h3><p className="rep">{current.campaign.memory.anchor.currentObjective || 'Nenhum objetivo atual imposto.'}<br/>{current.campaign.memory.anchor.themes.join(' · ')}</p><hr/><h3>FATOS CANÔNICOS</h3>{current.campaign.memory.canon.slice(-5).reverse().map(fact => <p className="journal-event" key={fact.id}>{fact.text}</p>)}<hr/><h3>ÚLTIMOS ACONTECIMENTOS</h3>{current.world.timeline.slice(-6).reverse().map(event => <p className="journal-event" key={event.id}>D{current.world.day} · {event.text}</p>)}</section>}
           {panel === 'map' && <section className="side-panel"><h3>LOCAIS DESCOBERTOS</h3><ul>{Object.values(current.world.locations).filter(place => place.discovered).map(place => <li key={place.id}><span>{place.id === current.world.currentLocationId ? '◆' : '◇'} {place.name}</span><em>{place.region}</em></li>)}</ul><hr/><h3>PESSOAS PRESENTES</h3>{Object.values(current.world.npcs).filter(npc => npc.locationId === current.world.currentLocationId && npc.status === 'active').map(npc => <article className="quest" key={npc.id}><b>{npc.name}</b><span>{npc.role} · {npc.profession}</span><small>Relação: {npc.relationship}</small></article>)}{Object.values(current.world.npcs).filter(npc => npc.status !== 'active').length > 0 && <><hr/><h3>PESSOAS AUSENTES</h3>{Object.values(current.world.npcs).filter(npc => npc.status !== 'active').map(npc => <p className="journal-event" key={npc.id}>{npc.name} · {npc.status}</p>)}</>}<hr/><h3>CULTURA LOCAL</h3><p className="rep">{current.world.culture.name}<br/>{current.world.culture.notes}</p><hr/><h3>LOJA LOCAL</h3>{Object.values(current.world.economy.shops).filter(shop => shop.locationId === current.world.currentLocationId).map(shop => <article key={shop.id}><b className="shop-name">{shop.name}</b><ul>{shop.products.map(product => <li key={product.id}><span>{product.name} · {product.stock}</span><button type="button" className="mini-action" disabled={busy || product.stock < 1 || current.character.gold < productPrice(current, product)} onClick={() => void sendTurn('buyItem', undefined, { shopId: shop.id, productId: product.id })}>{productPrice(current, product)} G</button></li>)}</ul></article>)}</section>}
         </aside>
       </div>
-      <section className="events">
-        <h3>REGISTRO DE CONSEQUÊNCIAS</h3>
-        {current.session.events.length ? current.session.events.slice(0, 5).map(event => <p key={event.id} className={`event ${event.type}`}>{event.text}</p>) : <p>Nenhuma consequência registrada.</p>}
-      </section>
+      <ConsequencesLog events={current.session.events}/>
       <form className="action-form" onSubmit={submitAction}>
         <label>{pendingRoll ? `TESTE DE ${pendingRoll.attribute.toUpperCase()} + ${pendingRoll.skill.toUpperCase()}` : 'O QUE VOCÊ FAZ?'}</label>
         {pendingRoll

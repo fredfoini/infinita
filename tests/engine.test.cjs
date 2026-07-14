@@ -28,10 +28,12 @@ const input = { campaignName: 'Teste', characterName: 'Lyra', className: 'Explor
 const initial = engine.createInitialState(input);
 check(initial.schemaVersion === 8, 'Estado deve usar schema v8 com perícias dinâmicas.');
 check(initial.character.sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png' && initial.character.appearanceDescription !== undefined, 'Identidade visual do personagem deve nascer persistida na campanha.');
+check(/visual sorteado/i.test(initial.character.appearanceDescription), 'Nova campanha deve receber aparência aleatória sem prometer reprodução de texto livre.');
 check(initial.character.mana <= initial.character.maxMana && initial.character.energy <= initial.character.maxEnergy, 'Recursos devem nascer dentro dos limites persistidos.');
 check(Array.isArray(initial.character.spells) && Array.isArray(initial.world.processedTurnIds), 'Magic Engine e idempotência devem existir no estado.');
 check(initial.visualCycle.validActionCount === 0 && initial.visualCycle.currentPhase === 'parchment', 'Nova campanha deve começar no pergaminho, na ação zero.');
 check(initial.campaign.originPrompt === input.openingPrompt, 'Origem livre deve ser persistida integralmente.');
+check(engine.currentLocation(initial).name === 'Local desconhecido' && !engine.currentLocation(initial).discovered, 'Sem descoberta narrativa, o local inicial deve permanecer desconhecido.');
 check(initial.campaign.memory.worldGenesis.originalPrompt === input.openingPrompt, 'World Genesis deve preservar integralmente o prompt inicial.');
 check(Array.isArray(initial.campaign.memory.canon) && initial.campaign.memory.anchor.themes.length > 0, 'Memória deve possuir Canon e Narrative Anchor.');
 check(initial.campaign.quests.length === 0 && Object.keys(initial.world.npcs).length === 0 && Object.keys(initial.world.factions).length === 0, 'Estado-base não deve impor missão, NPC ou facção.');
@@ -56,7 +58,9 @@ check(failure.state.session.lastRoll?.die === 1 && failure.state.world.timeline.
 const continuation = engine.beginAction(failure.state, 'Eu recuo e observo outra entrada.');
 check(continuation.state.session.turn === failure.state.session.turn + 1, 'A campanha deve continuar após uma falha.');
 
-const moved = engine.beginAction(continuation.state, 'Eu sigo até a Floresta dos Sinos.');
+const seeking = engine.beginAction(continuation.state, 'Eu procuro uma cidade próxima.');
+check(engine.currentLocation(seeking.state).name === 'Local desconhecido' && !JSON.stringify(seeking.state).includes('Assentamento'), 'Procurar uma cidade não deve fabricar um assentamento antes da descoberta.');
+const moved = { state: engine.applyNarrativeWorldDelta(seeking.state, { locations: [{ name: 'Floresta dos Sinos', region: 'Arquipélago Suspenso', kind: 'forest', description: 'Árvores metálicas ressoam ao vento.' }], currentLocationName: 'Floresta dos Sinos' }, 'A trilha termina na Floresta dos Sinos, revelada além da névoa.') };
 check(engine.currentLocation(moved.state).kind === 'forest', 'Exploração deve inferir o tipo de um novo local sem lore fixa.');
 check(engine.currentLocation(moved.state).name.includes('Floresta'), 'Nome declarado pelo jogador deve persistir no mapa.');
 
@@ -71,11 +75,14 @@ const genesis = engine.applyGenesis(initial, {
 });
 check(engine.currentLocation(genesis).name === 'Farol Errante', 'Gênese deve substituir a cena neutra pela origem criada pela IA.');
 check(genesis.world.culture.name === 'Navegantes do Céu' && genesis.campaign.opportunities.length === 2, 'Cultura e oportunidades iniciais devem persistir.');
-check(Object.values(genesis.world.npcs)[0].status === 'active', 'NPC emergente deve nascer substituível e ativo.');
-check(Object.values(genesis.world.npcs)[0].memoryProfile && engine.currentLocation(genesis).visualIdentity, 'NPC e local devem persistir continuidade narrativa e visual.');
-check(Object.values(genesis.world.npcs)[0].sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png', 'NPC importante deve receber identidade visual persistente.');
+check(Object.keys(genesis.world.npcs).length === 0, 'Gênese não deve impor NPC; pessoas devem nascer das ações posteriores do jogador.');
+const withNpc = engine.applyNarrativeWorldDelta(genesis, { npcs: [{ name: 'Iria', role: 'Náufraga', personality: 'Desconfiada', goal: 'Voltar para casa', profession: 'Cartógrafa' }] }, 'Ao investigar o farol, você encontra Iria protegida atrás do mecanismo partido.');
+check(Object.values(withNpc.world.npcs)[0].status === 'active' && Object.values(withNpc.world.npcs)[0].memoryProfile, 'NPC citado na consequência deve nascer incrementalmente e persistir memória.');
+check(Object.values(withNpc.world.npcs)[0].sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png', 'NPC emergente importante deve receber identidade visual persistente.');
+const inventedOffscreen = engine.applyNarrativeWorldDelta(withNpc, { npcs: [{ name: 'Decorativo', role: 'Figurante', personality: '', goal: '', profession: '' }] }, 'A engrenagem do farol volta a girar.');
+check(!Object.values(inventedOffscreen.world.npcs).some(npc => npc.name === 'Decorativo'), 'NPC ausente da narrativa não deve ser materializado pela Engine.');
 
-const evolved = engine.applyNarrativeWorldDelta(genesis, { quests: [{ title: 'Manter o farol no ar', description: 'Impedir a queda.', objective: 'Estabilizar o mecanismo', status: 'active' }], worldChanges: ['Uma das correntes de sustentação se rompeu.'] });
+const evolved = engine.applyNarrativeWorldDelta(withNpc, { quests: [{ title: 'Manter o farol no ar', description: 'Impedir a queda.', objective: 'Estabilizar o mecanismo', status: 'active' }], worldChanges: ['Uma das correntes de sustentação se rompeu.'] });
 check(evolved.campaign.quests[0].source === 'emergent', 'Objetivos devem ser marcados como emergentes.');
 check(evolved.world.changes.some(change => change.includes('correntes')), 'Mudanças do mundo devem ser permanentes.');
 const withoutNpc = engine.applyNarrativeWorldDelta(evolved, { npcChanges: [{ name: 'Iria', status: 'departed', memory: 'Partiu em uma embarcação.' }] });
@@ -93,6 +100,13 @@ check(purchase.state.character.inventory.some(item => item.name === 'Corda celes
 
 const migrated = engine.migrateState({ campaignId: 'old', campaignName: 'Antiga', characterName: 'Nox', className: 'Ladino', level: 2, xp: 100, hp: 8, maxHp: 12, gold: 3, log: ['Cena antiga'] });
 check(migrated && migrated.schemaVersion === 8 && migrated.campaign.originPrompt, 'Save legado deve migrar para o paradigma emergente.');
+const contaminated = structuredClone(withNpc);
+const seedNpc = Object.values(contaminated.world.npcs)[0];
+contaminated.world.npcs['npc-mara'] = { ...seedNpc, id: 'npc-mara', name: 'Mara Vell' };
+contaminated.world.locations[contaminated.world.currentLocationId].name = 'Assentamento';
+contaminated.session.narrative = 'Mara Vell aguarda no Assentamento.';
+const scrubbed = engine.migrateState(contaminated);
+check(scrubbed && !/mara vell|assentamento/i.test(JSON.stringify(scrubbed)) && engine.currentLocation(scrubbed).name === 'Local desconhecido', 'Migração deve remover Mara Vell e rótulos genéricos de saves existentes.');
 
 let cycle = visualCycle.createVisualCycle('cycle-test');
 for (let action = 1; action <= 10; action += 1) cycle = visualCycle.advanceVisualCycle(cycle);

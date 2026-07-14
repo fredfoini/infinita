@@ -37,13 +37,13 @@ export default function IntroSequence({ campaign, onComplete }: { campaign: Game
   return <main className="intro-screen" aria-label="Introdução da campanha">
     <button type="button" className="intro-skip" onClick={finish}>PULAR</button>
     <section className="intro-stage">
-      <div className="intro-sky"><i className="intro-sun" /><i className="bird b1" /><i className="bird b2" /></div>
-      <div className="intro-mountains back" /><div className="intro-mountains front" />
-      <div className="intro-forest"><i/><i/><i/><i/><i/><i/></div>
-      <div className="intro-road" />
-      <div className={`intro-village ${location.kind}`} />
+      <div className="intro-pixel-sequence" aria-hidden="true">
+        <div className="intro-frame intro-sky frame-dawn" />
+        <div className="intro-frame frame-waterfall" />
+        <div className="intro-frame frame-village" />
+        <div className="intro-frame frame-shrine" />
+      </div>
       <PixelActor identity={campaign.character.sprite} animation="walk" label={`${campaign.character.name} inicia a jornada`} className="intro-hero" />
-      <div className="intro-portal"><i /><span>✦</span></div>
       <div className="intro-leaves"><i/><i/><i/><i/><i/></div>
       <div className="intro-brand"><Logo variant="intro" priority/><small>{campaign.character.name} · {campaign.character.className} · {location.name}</small></div>
       <div className="intro-message"><p>Uma nova aventura criada por você,<br/>como quiser, começa agora…</p>{elapsed >= 11.5 && <button type="button" onClick={finish}>COMEÇAR JORNADA</button>}</div>

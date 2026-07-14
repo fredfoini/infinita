@@ -73,6 +73,8 @@ export function createSceneVisualDescriptor(state: GameState): SceneVisualDescri
     importantObjects: objects,
     safetyClass: 'safe',
     visualSummary: `${emotion.primary} em ${locationType}; ${inferAction(action)}; ${timeLabel(state.world.hour)}; clima ${state.world.weather}`,
+    playerPromptInfluence: action.slice(0, 500),
+    characterVisualIdentity: `${state.character.name}; ${state.character.className}; ${state.character.personality}; ${state.character.appearanceDescription}`.slice(0, 500),
   };
 }
 
@@ -86,7 +88,9 @@ export function normalizeDescriptor(input: SceneVisualDescriptor): SceneVisualDe
     locationType: clean(input.locationType, 'ambiente desconhecido'), environmentTags: list(input.environmentTags), timeOfDay: clean(input.timeOfDay, '', 30) || undefined,
     weather: clean(input.weather, '', 50) || undefined, actionType: clean(input.actionType, 'exploração'), numberOfCharacters: Math.max(0, Math.min(12, Number(input.numberOfCharacters) || 0)),
     characterArchetypes: list(input.characterArchetypes, 6), relationshipContext: clean(input.relationshipContext, '', 80) || undefined,
-    importantObjects: list(input.importantObjects, 8), safetyClass: input.safetyClass === 'sanitized' ? 'sanitized' : 'safe', visualSummary: clean(input.visualSummary, 'cena ambiental de aventura', 300),
+    importantObjects: list(input.importantObjects, 8), safetyClass: input.safetyClass === 'sanitized' ? 'sanitized' : 'safe', visualSummary: clean(input.visualSummary, 'cena ambiental de aventura', 500),
+    playerPromptInfluence: clean(input.playerPromptInfluence, '', 600) || undefined,
+    characterVisualIdentity: clean(input.characterVisualIdentity, '', 600) || undefined,
   };
 }
 
