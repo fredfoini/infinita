@@ -377,10 +377,54 @@ function makeSkill(name: string, attribute: AttributeKey, trained = false, campa
 
 function classTemplate(className: string) {
   const lower = className.toLowerCase();
-  if (/guerreiro|cavaleiro|bárbaro|soldado|paladino/.test(lower)) return { primary: 'Combate', attribute: 'Força' as AttributeKey, hp: 18, mana: 4, profession: 'Armeiro itinerante' };
-  if (/ladino|pirata|assassino|gatuno|espião/.test(lower)) return { primary: 'Furtividade', attribute: 'Destreza' as AttributeKey, hp: 13, mana: 7, profession: 'Batedor' };
-  if (/místico|mago|bruxo|druida|feiticeiro|clérigo/.test(lower)) return { primary: 'Arcana', attribute: 'Inteligência' as AttributeKey, hp: 11, mana: 18, profession: 'Copista de runas' };
-  return { primary: 'Sobrevivência', attribute: 'Sabedoria' as AttributeKey, hp: 15, mana: 9, profession: 'Cartógrafo' };
+  if (/guerreiro|cavaleiro|bárbaro|soldado|paladino/.test(lower)) return { primary: 'Combate', attribute: 'Força' as AttributeKey, hp: 18, mana: 4, profession: 'Combatente' };
+  if (/ladino|pirata|assassino|gatuno|espião/.test(lower)) return { primary: 'Furtividade', attribute: 'Destreza' as AttributeKey, hp: 13, mana: 7, profession: 'Infiltrador' };
+  if (/místico|mago|bruxo|druida|feiticeiro|clérigo/.test(lower)) return { primary: 'Arcana', attribute: 'Inteligência' as AttributeKey, hp: 11, mana: 18, profession: 'Ocultista' };
+  if (/cowboy|pistoleiro|atirador|caçador de recompensas/.test(lower)) return { primary: 'Combate', attribute: 'Destreza' as AttributeKey, hp: 14, mana: 5, profession: 'Pistoleiro' };
+  if (/explorador|ranger|patrulheiro|caçador|batedor/.test(lower)) return { primary: 'Sobrevivência', attribute: 'Sabedoria' as AttributeKey, hp: 15, mana: 9, profession: 'Explorador' };
+  return { primary: 'Sobrevivência', attribute: 'Sabedoria' as AttributeKey, hp: 15, mana: 9, profession: clean(className, 80) || 'Aventureiro' };
+}
+
+function recoveredItemCategory(name: string): ItemCategory {
+  const normalized = normalizeSemanticText(name);
+  if (/revolver|pistola|rifle|espada|faca|adaga|arco|machado|arma/.test(normalized)) return 'weapon';
+  if (/carta|bilhete|mapa|livro|documento|diario/.test(normalized)) return 'document';
+  if (/cantil|pocao|racao|comida|bebida|agua/.test(normalized)) return 'consumable';
+  if (/chave/.test(normalized)) return 'key';
+  if (/armadura|elmo|capacete|escudo/.test(normalized)) return 'armor';
+  if (/anel|colar|amuleto|capa/.test(normalized)) return 'accessory';
+  if (/corda|tocha|lanterna|ferramenta|kit/.test(normalized)) return 'tool';
+  return 'narrative';
+}
+
+function recoverConfirmedInventory(state: GameState) {
+  const sources = [
+    state.session.narrative,
+    ...state.session.events.slice(-30).map(event => event.text),
+    ...state.world.timeline.slice(-30).map(event => event.text),
+    ...state.world.changes.slice(-30),
+  ].filter(Boolean);
+  const names: string[] = [];
+  const storedPattern = /(?:guarda|guardou|coloca|colocou|põe|pôs)\s+(?:cuidadosamente\s+)?(?:o|a|um|uma)?\s*([^,.!?]{2,80}?)\s+(?:na|no|em sua|dentro da)\s+(?:mochila|bolsa|inventário)/gi;
+  const containerPattern = /(?:pegou|guardou|adquiriu|saqueou|recolheu)[^.!?]{0,160}?\bcontendo\s+([^.!?]{2,180})/gi;
+  for (const source of sources) {
+    storedPattern.lastIndex = 0;
+    containerPattern.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = storedPattern.exec(source)) !== null) names.push(match[1]);
+    while ((match = containerPattern.exec(source)) !== null) names.push(...match[1].split(/\s*,\s*|\s+e\s+/i));
+  }
+  const known = new Set(state.character.inventory.map(item => normalizeSemanticText(item.name)));
+  for (const candidate of names) {
+    let name = clean(candidate, 80).replace(/^(?:o|a|os|as|um|uma|seu|sua)\s+/i, '').replace(/\s+(?:meio cheia?|com letras.*)$/i, '').trim();
+    if (normalizeSemanticText(name) === 'cantil') name = 'Cantil de água';
+    if (!name || known.has(normalizeSemanticText(name))) continue;
+    name = name.charAt(0).toLocaleUpperCase('pt-BR') + name.slice(1);
+    const item = normalizeItem({ name, description: `${name} recuperado do registro confirmado da campanha.`, category: recoveredItemCategory(name), quantity: 1 }, state.character.name, 'Recuperado da narrativa canônica da campanha.', state.session.turn);
+    state.character.inventory.push(item);
+    state.world.itemRegistry[item.id] = structuredClone(item);
+    known.add(normalizeSemanticText(name));
+  }
 }
 
 function startingAttributes(className: string): Attributes {
@@ -1037,7 +1081,7 @@ export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload):
   const next: GameState = {
     ...state,
     campaign: { ...state.campaign, premise, conflict: clean(genesis.conflict || state.campaign.conflict, 500), opportunities: Array.from(new Set((genesis.opportunities || []).map(value => clean(value, 220)).filter(Boolean))).slice(0, 12), memory: { ...state.campaign.memory, worldGenesis: { ...state.campaign.memory.worldGenesis, structuredSummary: premise }, canon: [...state.campaign.memory.canon, { id: `genesis-world-${location.id}`, category: 'location', text: `Mundo inicial: ${location.name}, ${location.region}.`, turn: 0, createdAt: state.save.createdAt }].slice(-120), campaignSummary: { ...state.campaign.memory.campaignSummary, text: premise } } },
-    character: { ...state.character, origin: clean(genesis.origin || state.character.origin, 400), profession: clean(genesis.profession || state.character.profession, 80), birthRegion: clean(genesis.birthRegion || state.character.birthRegion, 80) },
+    character: { ...state.character, origin: clean(genesis.origin || state.character.origin, 400), profession: classTemplate(state.character.className).profession, birthRegion: clean(genesis.birthRegion || state.character.birthRegion, 80) },
     world: {
       ...state.world,
       hour: clamp(Number(genesis.hour) || state.world.hour, 0, 23),
@@ -1126,6 +1170,7 @@ export function migrateState(value: unknown): GameState | null {
     current.character.inventory = (current.character.inventory || []).map((item: Partial<Item> & Pick<Item, 'name' | 'description'>) => normalizeItem(item, current.character.name, item.origin || 'Migrado de uma campanha anterior.', current.session.turn || 0));
     current.world.itemRegistry ||= {};
     for (const item of current.character.inventory as Item[]) current.world.itemRegistry[item.id] = structuredClone(item);
+    recoverConfirmedInventory(current as GameState);
     current.world.unlocks ||= { locations: [], dialogues: [], events: [] };
     current.world.processedTurnIds ||= [];
     current.world.skillAudits ||= [];
@@ -1161,6 +1206,14 @@ export function migrateState(value: unknown): GameState | null {
       if (!previous || normalized.level > previous.level || normalized.experience > previous.experience) migratedSkills[normalized.name] = normalized;
     }
     current.character.skills = migratedSkills;
+    if (normalizeSemanticText(current.character.profession) === 'cartografo') {
+      const correctedProfession = classTemplate(current.character.className).profession;
+      current.character.profession = correctedProfession;
+      current.character.professions = Array.from(new Set([
+        correctedProfession,
+        ...(current.character.professions || []).filter((profession: string) => normalizeSemanticText(profession) !== 'cartografo'),
+      ]));
+    }
     current.session.currentTurnId ||= '';
     if (current.session.pendingRoll && !current.session.pendingRoll.coreAttribute) {
       const pending = current.session.pendingRoll;

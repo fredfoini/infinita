@@ -37,8 +37,8 @@ main.game-screen{position:relative;isolation:isolate;display:block;min-height:10
 .portable-brand{display:flex;align-items:center;gap:var(--ui-space-2);width:clamp(86px,22%,118px);min-width:86px}
 .power-pixel{position:relative;flex:0 0 10px;width:10px;height:10px;border:2px solid #5b3127;border-radius:50%;background:#e54d32;box-shadow:0 0 0 2px #b58a55,0 0 8px #f05b38}
 .official-logo-header{width:clamp(70px,18vw,98px)!important;height:42px!important;max-width:100%;margin:0!important;object-fit:contain;object-position:left center}
-.portable-header .header-status{display:flex;align-items:center;justify-content:flex-end;gap:var(--ui-space-2);min-width:0}
-.campaign-clock{max-width:170px;overflow:hidden;color:#4c493a;font:6px/1.45 'Press Start 2P';text-align:right;text-overflow:ellipsis;white-space:nowrap}
+.portable-header .header-status{display:flex;flex:1 1 auto;align-items:center;justify-content:flex-end;gap:var(--ui-space-2);min-width:0}
+.portable-header .campaign-clock{display:block;flex:1 1 auto;min-width:0;max-width:none;overflow:hidden;color:#4c493a;font:6px/1.45 'Press Start 2P';text-align:right;text-overflow:ellipsis;white-space:nowrap}
 .game-screen .audio-toggle,.game-screen .mobile-menu-toggle{display:block;min-width:58px;min-height:38px;padding:var(--ui-space-2);border:2px solid var(--ui-frame);border-radius:4px;background:#686451;color:#fff5ce;box-shadow:inset 0 -3px #3a3b31;font:7px 'Press Start 2P'}
 .game-screen .mobile-menu-toggle{background:var(--ui-green)}
 
@@ -46,8 +46,8 @@ main.game-screen{position:relative;isolation:isolate;display:block;min-height:10
 .game-screen .scene-name{left:var(--ui-space-3);bottom:var(--ui-space-3);max-width:calc(100% - 24px);padding:7px 9px;overflow:hidden;border:2px solid #b49351;background:#20291fe8;color:#f4e8bd;font:7px 'Press Start 2P';text-overflow:ellipsis;text-shadow:none;white-space:nowrap}
 .game-screen .scene-vignette{border:2px solid #242b23;box-shadow:inset 0 0 0 2px #a99361,inset 0 -30px 40px #10181044}
 
-.game-screen .narrative{order:2;position:relative;min-height:180px;max-height:clamp(210px,28svh,280px);padding:var(--ui-space-6);overflow-y:auto;border:var(--ui-border) solid var(--ui-frame);border-top:0;background:var(--ui-paper);box-shadow:inset 0 0 0 2px #fff9dc;color:var(--ui-ink);font:clamp(21px,4.8vw,27px)/1.24 VT323,monospace;white-space:pre-line;scrollbar-color:#8c8364 #ddd5ae}
-.game-screen .narrative:after{content:"";position:absolute;pointer-events:none;inset:8px;border:1px solid #b7aa80}
+.game-screen .narrative{order:2;position:relative;min-height:180px;max-height:clamp(210px,28svh,280px);padding:var(--ui-space-6);overflow-y:auto;border:var(--ui-border) solid var(--ui-frame);border-top:0;background:var(--ui-paper);box-shadow:inset 0 0 0 2px #fff9dc,inset 0 0 0 3px #b7aa80;color:var(--ui-ink);font:clamp(21px,4.8vw,27px)/1.24 VT323,monospace;scrollbar-color:#8c8364 #ddd5ae}
+.game-screen .narrative-copy{max-width:100%;margin:0;overflow-wrap:break-word;word-break:normal;white-space:pre-line}
 .game-screen .narrative>*{position:relative;z-index:1}
 .game-screen .tutorial-tip{margin-top:var(--ui-space-4);padding:var(--ui-space-2) var(--ui-space-3);border:0;border-left:4px solid var(--ui-bronze);background:#e4dcb8;color:#615d49;font:6px/1.65 'Press Start 2P'}
 .game-screen .roll-result{margin-top:var(--ui-space-4);padding:var(--ui-space-3);font:7px/1.6 'Press Start 2P'}
@@ -88,11 +88,10 @@ main.game-screen{position:relative;isolation:isolate;display:block;min-height:10
   .game-screen .shell{min-height:100dvh;padding:0;border-width:0;border-radius:0;box-shadow:none}
   .portable-header{top:0;min-height:58px;border-width:0 0 3px;padding:var(--ui-space-2)}
   .portable-brand{width:94px}.official-logo-header{width:72px!important;height:40px!important}
-  .campaign-clock{display:none}
+  .portable-header .campaign-clock{display:none}
   .game-screen .audio-toggle,.game-screen .mobile-menu-toggle{min-width:57px;min-height:38px;font-size:6px}
   .game-screen .scene{height:clamp(235px,37svh,360px);border-width:0 0 3px}
   .game-screen .narrative{min-height:175px;max-height:28svh;padding:var(--ui-space-4);border-width:0 0 3px;font-size:22px}
-  .game-screen .narrative:after{inset:6px}
   .game-screen .events{max-height:112px;padding:var(--ui-space-3);border-width:0 0 3px}
   .game-screen .events p{font-size:16px}
   .game-screen .action-form{bottom:0;padding:var(--ui-space-2) var(--ui-space-3) var(--ui-space-3);border-width:0;border-top:3px solid var(--ui-frame)}

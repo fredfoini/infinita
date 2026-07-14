@@ -302,7 +302,7 @@ export default function Game() {
             <div className="scene-name">{location?.name} · {current.world.weather}</div>
           </div>
           <article className="narrative" aria-live="polite">
-            {busy && <span className="thinking">◆</span>}{cleanNarrativeScaffolding(current.session.narrative, current.character.name) || current.session.narrative}
+            <p className="narrative-copy">{busy && <span className="thinking">◆</span>}{cleanNarrativeScaffolding(current.session.narrative, current.character.name) || current.session.narrative}</p>
             {lastRoll && <div className={`roll-result ${['partial_success', 'success', 'critical_success'].includes(lastRoll.outcome) ? 'success' : 'failure'}`}>D20 {lastRoll.die} · TOTAL {lastRoll.total} · {OUTCOME_LABEL[lastRoll.outcome] || (lastRoll.success ? 'SUCESSO' : 'FALHA')}</div>}
             {current.session.turn < 2 && <div className="tutorial-tip">Escreva qualquer ação. Quando houver risco, você rolará um dado D20.</div>}
           </article>

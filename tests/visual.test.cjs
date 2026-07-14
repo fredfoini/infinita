@@ -28,6 +28,7 @@ check(narrativeCleaner.cleanNarrativeScaffolding('Kain executa: “Eu exploro o 
 
 for (const file of ['lib/visual/scene-descriptor.ts','lib/visual/image-provider.ts','lib/visual/visual-asset-repository.ts','lib/visual/global-visual-registry.ts','lib/visual/visual-cycle.ts','lib/visual/sprite-system.ts','app/api/visual-library/route.ts','app/api/visual/evolve/route.ts','app/portable.css','components/PortableGameHeader.tsx','components/ConsequencesLog.tsx','components/SceneVisual.tsx','components/LayeredWorldScene.tsx','components/PixelActor.tsx','components/ItemIcon.tsx','components/ParchmentWriting.tsx','components/AdminVisualDashboard.tsx','components/Logo.tsx','public/assets/logo.png','public/assets/parchment-writing-v1.gif','public/assets/parchment-writing-source-v1.png','public/assets/hero-sprite-sheet-v1.png','public/assets/world-scene-atlas-v1.png','public/assets/intro-scene-atlas-v2.png','public/assets/item-icon-atlas-v1.png']) check(fs.existsSync(path.join(process.cwd(), file)), `${file} deve existir.`);
 check(fs.statSync(path.join(process.cwd(), 'public/assets/parchment-writing-v1.gif')).size < 2_000_000, 'GIF do pergaminho deve permanecer abaixo de 2 MB.');
+check(!read('components/ParchmentWriting.tsx').includes('A CRÔNICA CONTINUA') && !read('components/ParchmentWriting.tsx').includes('parchment-caption'), 'Pergaminho não deve sobrepor uma legenda ao nome do local.');
 const game = read('components/Game.tsx');
 check(game.includes("dynamic(() => import('@/components/SceneVisual')") && game.includes('onIllustrationResolved={resolveIllustration}') && !game.includes('ProceduralScene'), 'Ciclo visual deve carregar sob demanda e persistir a ilustração.');
 check(game.includes('MOCHILA') && !game.includes("setPanel('visual')") && game.includes('DIÁRIO'), 'HUD deve preservar inventário e diário sem expor controles técnicos visuais.');
@@ -49,6 +50,7 @@ check(game.includes('TESTE DE ${pendingRoll.attribute.toUpperCase()} + ${pending
 check(read('components/IntroSequence.tsx').includes('elapsed / 12') && read('components/IntroSequence.tsx').includes('intro-sky') && read('components/IntroSequence.tsx').includes('PULAR'), 'Cutscene clássica de doze segundos deve ser restaurada e permitir pular.');
 check(read('components/IntroSequence.tsx').includes('intro-pixel-sequence') && css.includes('intro-scene-atlas-v2.png'), 'Cutscene deve usar cenários integralmente em pixel art, sem montanhas vetoriais.');
 check(read('components/InventoryPanel.tsx').includes('<ItemIcon item={item} campaignId={campaignId}') && read('components/ItemIcon.tsx').includes('/api/visual/evolve') && css.includes('item-icon-atlas-v1.png'), 'Inventário deve usar o atlas original e evoluir globalmente ícones ainda desconhecidos.');
+check(read('lib/items/item-engine.ts').includes('suggestions.slice(0, 12)') && !read('lib/items/item-engine.ts').includes('if (!validEffects.length) return null'), 'Engine deve registrar múltiplos itens por turno e completar efeitos ausentes.');
 check(read('lib/visual/global-visual-registry.ts').includes('parentAssetId') === false && read('lib/visual/image-provider.ts').includes('parentAssetId') && read('lib/visual/types.ts').includes('lineageGeneration'), 'Assets devem registrar pai, raiz e geração de linhagem.');
 check(read('components/LayeredWorldScene.tsx').includes("kind: 'motion-sheet'") && read('lib/visual/sprite-system.ts').includes("'custom'"), 'Ações novas do jogador devem poder criar movimentos incrementais persistidos globalmente.');
 check(!game.includes('setAppearanceDescription') && game.includes('VISUAL SORTEADO'), 'Menu não deve solicitar uma aparência que o sprite não reproduzirá; o visual deve ser sorteado.');
@@ -56,6 +58,7 @@ const portableCss = read('app/portable.css');
 check(portableCss.includes('width:min(100%,680px)') && portableCss.includes('.game-screen .grid,.game-screen .adventure{display:contents}'), 'Desktop deve preservar a pilha mobile dentro de um container portátil central.');
 check(portableCss.includes('--ui-space-1:4px') && portableCss.includes('--ui-space-6:24px') && read('app/layout.tsx').includes("import './portable.css'"), 'Design System portátil deve usar tokens compartilhados e ser carregado após o legado.');
 check(game.includes('<PortableGameHeader') && game.includes('<ConsequencesLog') && read('components/ConsequencesLog.tsx').includes('event.priority >= 55'), 'Header e consequências devem ser componentes reutilizáveis, mantendo apenas eventos importantes.');
+check(portableCss.includes('.portable-header .header-status{display:flex;flex:1 1 auto') && portableCss.includes('.portable-header .campaign-clock{display:block;flex:1 1 auto') && !portableCss.includes('.campaign-clock{max-width:170px'), 'Cabeçalho desktop deve reservar espaço flexível para campanha, nível, dia e hora sem corte prematuro.');
 
 const gameMaster = read('lib/game-master.ts');
 const turnRoute = read('app/api/turn/route.ts');
@@ -64,6 +67,7 @@ check(turnRoute.includes('stableD20') && turnRoute.includes("narration.mode !== 
 check(turnRoute.includes('actionPreserved: true') && game.includes('setAction(playerAction)'), 'Falha narrativa em uma ação comum deve preservar estado e texto para retry.');
 check(!gameMaster.includes('A rotina de') && !gameMaster.includes('proceduralReaction'), 'Fallback genérico não pode aparecer como se fosse uma reação narrativa real.');
 check(!gameMaster.includes('${state.character.name} executa:') && gameMaster.includes('cleanNarrativeScaffolding') && gameMaster.includes('Comece diretamente pela reação concreta do mundo'), 'Narração deve remover a repetição da ação e começar pela consequência.');
+check(gameMaster.includes('TODOS os objetos adquiridos') && gameMaster.includes('inferConfirmedStoredItems') && !gameMaster.includes('Use no máximo um item por turno'), 'Contrato narrativo deve sincronizar todo loot confirmado e recuperar itens explicitamente guardados.');
 check(read('app/api/visual/evolve/route.ts').includes('localOnly') && read('lib/visual/global-visual-registry.ts').includes("contribution.mode === 'local-only'"), 'Conteúdo restrito deve permanecer local e nunca entrar no banco visual global.');
 
 const providers = read('lib/providers/provider-factory.ts');
@@ -78,5 +82,7 @@ check(
   'Imagem deve usar a OpenAI para geração e derivação visual antes do cache/pergaminho.',
 );
 for (const file of ['lib/skills/types.ts','lib/skills/skill-semantic-resolver.ts','lib/skills/test-selection-validator.ts','lib/skills/skill-check-engine.ts','tests/skills.test.cjs']) check(fs.existsSync(path.join(process.cwd(), file)), `${file} deve existir.`);
+check(imageProvider.includes("IMAGE_SCENE_QUALITY || 'high'") && imageProvider.includes('.resize(1536, 864') && imageProvider.includes('infinita-scene-hd-v2') && sceneVisual.includes('HD_SCENE_PROMPT_VERSION') && css.includes('image-rendering:auto'), 'Ilustrações de cena devem usar qualidade alta, proporção portátil e redimensionamento nítido, sem reutilizar cache antigo de baixa definição.');
+check(game.includes('className="narrative-copy"') && portableCss.includes('overflow-wrap:break-word') && !portableCss.includes('.game-screen .narrative:after'), 'Narrativa desktop deve quebrar linhas dentro da moldura sem sobreposição do pseudo-elemento.');
 
 console.log(`INFINITA Visual: ${assertions} invariantes verificadas.`);

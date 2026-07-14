@@ -26,6 +26,8 @@ function check(condition, message) { assertions += 1; if (!condition) throw new 
 
 const input = { campaignName: 'Teste', characterName: 'Lyra', className: 'Explorador', openingPrompt: 'Acordei sem memória dentro de um farol que flutua sobre o oceano.' };
 const initial = engine.createInitialState(input);
+const cowboy = engine.createInitialState({ ...input, characterName: 'Modred', className: 'Cowboy' });
+check(cowboy.character.profession === 'Pistoleiro' && cowboy.character.className === 'Cowboy', 'Classe escolhida deve definir uma profissão coerente, sem cair sempre em Cartógrafo.');
 check(initial.schemaVersion === 8, 'Estado deve usar schema v8 com perícias dinâmicas.');
 check(initial.character.sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png' && initial.character.appearanceDescription !== undefined, 'Identidade visual do personagem deve nascer persistida na campanha.');
 check(/visual sorteado/i.test(initial.character.appearanceDescription), 'Nova campanha deve receber aparência aleatória sem prometer reprodução de texto livre.');
@@ -74,6 +76,7 @@ const genesis = engine.applyGenesis(initial, {
   economy: { regionMultiplier: 1.2, shopName: 'Arca de Trocas', products: [{ name: 'Corda celeste', kind: 'ferramenta', basePrice: 7, stock: 2, description: 'Fibra leve e resistente.' }] }, weather: 'Ventos fortes', hour: 6,
 });
 check(engine.currentLocation(genesis).name === 'Farol Errante', 'Gênese deve substituir a cena neutra pela origem criada pela IA.');
+check(genesis.character.profession === 'Explorador', 'A IA não pode sobrescrever a identidade da classe escolhida com uma profissão genérica.');
 check(genesis.world.culture.name === 'Navegantes do Céu' && genesis.campaign.opportunities.length === 2, 'Cultura e oportunidades iniciais devem persistir.');
 check(Object.keys(genesis.world.npcs).length === 0, 'Gênese não deve impor NPC; pessoas devem nascer das ações posteriores do jogador.');
 const withNpc = engine.applyNarrativeWorldDelta(genesis, { npcs: [{ name: 'Iria', role: 'Náufraga', personality: 'Desconfiada', goal: 'Voltar para casa', profession: 'Cartógrafa' }] }, 'Ao investigar o farol, você encontra Iria protegida atrás do mecanismo partido.');
@@ -107,6 +110,11 @@ contaminated.world.locations[contaminated.world.currentLocationId].name = 'Assen
 contaminated.session.narrative = 'Mara Vell aguarda no Assentamento.';
 const scrubbed = engine.migrateState(contaminated);
 check(scrubbed && !/mara vell|assentamento/i.test(JSON.stringify(scrubbed)) && engine.currentLocation(scrubbed).name === 'Local desconhecido', 'Migração deve remover Mara Vell e rótulos genéricos de saves existentes.');
+const wrongProfession = structuredClone(cowboy);
+wrongProfession.character.profession = 'Cartógrafo';
+wrongProfession.character.professions = ['Cartógrafo'];
+const correctedProfession = engine.migrateState(wrongProfession);
+check(correctedProfession?.character.profession === 'Pistoleiro' && !correctedProfession.character.professions.includes('Cartógrafo'), 'Migração deve corrigir campanhas existentes afetadas pelo fallback de Cartógrafo.');
 
 let cycle = visualCycle.createVisualCycle('cycle-test');
 for (let action = 1; action <= 10; action += 1) cycle = visualCycle.advanceVisualCycle(cycle);
@@ -125,6 +133,18 @@ check(failure.state.visualCycle.validActionCount === beforeRollCount + 1, 'Uma r
 const procedural = engine.applyNarrativeWorldDelta(initial, { items: [{ name: 'Vara de Maré', description: 'Uma vara artesanal adaptada ao oceano suspenso.', category: 'tool', rarity: 'uncommon', weight: 1.2, value: 18, quantity: 1, origin: 'Encontrada no depósito do farol.', narrativeEffects: ['Permite alcançar cardumes entre as nuvens.'], mechanicalEffects: [{ type: 'unlock_action', target: 'pescar entre as nuvens', value: 1 }], durability: 24 }] }, 'Lyra encontra a Vara de Maré no depósito e decide carregá-la.');
 const generatedItem = procedural.character.inventory.find(item => item.name === 'Vara de Maré');
 check(generatedItem && procedural.world.itemRegistry[generatedItem.id], 'Item sugerido pela IA deve ser validado e persistido no registro mundial.');
+const multipleLoot = engine.applyNarrativeWorldDelta(initial, { items: [
+  { name: 'Faca de caça', description: 'Uma lâmina curta e resistente.', category: 'weapon', rarity: 'common', weight: 1, value: 4, quantity: 1, origin: 'Bolsa encontrada.', narrativeEffects: [], mechanicalEffects: [], durability: 20 },
+  { name: 'Cantil de água', description: 'Um cantil ainda meio cheio.', category: 'consumable', rarity: 'common', weight: .6, value: 2, quantity: 1, origin: 'Bolsa encontrada.', narrativeEffects: [], mechanicalEffects: [], durability: null },
+  { name: 'Carta amassada', description: 'Uma carta com letras quase ilegíveis.', category: 'document', rarity: 'common', weight: .05, value: 1, quantity: 1, origin: 'Bolsa encontrada.', narrativeEffects: [], mechanicalEffects: [], durability: null },
+] }, 'Lyra pega a Faca de caça, o Cantil de água e a Carta amassada e guarda os três objetos.');
+check(['Faca de caça', 'Cantil de água', 'Carta amassada'].every(name => multipleLoot.character.inventory.some(item => item.name === name)), 'Todos os itens adquiridos no mesmo turno devem entrar na mochila.');
+check(multipleLoot.character.inventory.filter(item => ['Faca de caça', 'Cantil de água', 'Carta amassada'].includes(item.name)).every(item => item.effects.mechanical.length > 0), 'Item sem efeito proposto pela IA deve receber efeito mecânico padrão em vez de ser descartado.');
+const incompleteSave = structuredClone(initial);
+incompleteSave.session.narrative = 'Você guarda cuidadosamente o revólver na mochila.';
+incompleteSave.world.changes.push('O personagem pegou a bolsa de couro contendo faca de caça, cantil e carta amassada.');
+const recoveredSave = engine.migrateState(incompleteSave);
+check(['Revólver', 'Faca de caça', 'Cantil de água', 'Carta amassada'].every(name => recoveredSave.character.inventory.some(item => item.name === name)), 'Migração deve recuperar loot confirmado que versões anteriores deixaram fora da mochila.');
 const usedTool = engine.performItemAction(procedural, { action: 'use', itemId: generatedItem.id });
 check(usedTool.state.character.unlockedActions.includes('pescar entre as nuvens'), 'Ferramenta deve desbloquear uma ação mecânica real.');
 const soldTool = engine.performItemAction(procedural, { action: 'sell', itemId: generatedItem.id });

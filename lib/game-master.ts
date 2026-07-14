@@ -54,6 +54,37 @@ function violatesConsentContract(narrative: string) {
   return /sem (?:poder|conseguir) resistir|contra (?:a|o) vontade|[ée] obrigad[ao]|n[aã]o tem escolha|cede automaticamente|passa a amar/i.test(narrative);
 }
 
+function inferredItemCategory(name: string): NonNullable<NarrativeWorldDelta['items']>[number]['category'] {
+  const normalized = name.toLocaleLowerCase('pt-BR');
+  if (/revólver|revolver|pistola|rifle|espada|faca|adaga|arco|machado|arma/.test(normalized)) return 'weapon';
+  if (/carta|bilhete|mapa|livro|documento|diário/.test(normalized)) return 'document';
+  if (/cantil|poção|ração|comida|bebida|água/.test(normalized)) return 'consumable';
+  if (/chave/.test(normalized)) return 'key';
+  if (/armadura|elmo|capacete|escudo/.test(normalized)) return 'armor';
+  if (/anel|colar|amuleto|capa/.test(normalized)) return 'accessory';
+  if (/ferramenta|corda|tocha|lanterna|kit/.test(normalized)) return 'tool';
+  return 'narrative';
+}
+
+function inferConfirmedStoredItems(narrative: string, existing: NarrativeWorldDelta['items']) {
+  const items = [...(existing || [])];
+  const known = new Set(items.map(item => item.name.toLocaleLowerCase('pt-BR')));
+  const pattern = /(?:guarda|guardou|coloca|colocou|põe|pôs)\s+(?:cuidadosamente\s+)?(?:o|a|um|uma)?\s*([^,.!?]{2,80}?)\s+(?:na|no|em sua|dentro da)\s+(?:mochila|bolsa|inventário)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(narrative)) !== null) {
+    const rawName = match[1].trim().replace(/^(?:seu|sua)\s+/i, '');
+    if (!rawName || known.has(rawName.toLocaleLowerCase('pt-BR'))) continue;
+    const name = rawName.charAt(0).toLocaleUpperCase('pt-BR') + rawName.slice(1);
+    items.push({
+      name, description: `${name} adquirido e guardado durante a cena.`, category: inferredItemCategory(name),
+      rarity: 'common', weight: .2, value: 1, quantity: 1, origin: 'Adquirido durante a campanha.',
+      narrativeEffects: [`${name} agora pertence ao personagem.`], mechanicalEffects: [], durability: null,
+    });
+    known.add(name.toLocaleLowerCase('pt-BR'));
+  }
+  return items.slice(0, 12);
+}
+
 export async function narrateTurn(state: GameState, action: string, fallbackNarrative: string, rollResult?: RollResult): Promise<{ reply: GameMasterReply; mode: 'ai' | 'fallback'; error?: string }> {
   const context = buildAiContext(state);
   const contract = `Retorne exatamente estas chaves: {"narrative":string,"requiresDice":boolean,"diceType":"d20","difficulty":number|null,"skill":string|null,"attribute":string|null,"reason":string|null,"actionInterpretation":{"rawAction":string,"intent":string,"domain":"combat|movement|social|romance|knowledge|craft|survival|perception|stealth|commerce|magic|performance|medicine|exploration|general","proposedSkill":string,"proposedAttribute":"strength|dexterity|constitution|intelligence|wisdom|charisma","actionMethod":string,"targetId":string,"requiresRoll":boolean,"opposed":boolean,"riskLevel":"none|low|medium|high|extreme","reasoning":string,"possibleExistingSkillKeys":string[],"trainable":boolean,"trivial":boolean,"consentRequired":boolean}|null,"npcActions":string[],"worldSuggestions":string[],"memoryUpdate":string[],"memorySummary":string,"worldDelta":{"locations":[{"name":string,"region":string,"kind":string,"description":string,"visualIdentity":{"architecture":string,"palette":string[],"fixedObjects":string[]}}],"currentLocationName":string|null,"npcs":[{"name":string,"role":string,"personality":string,"goal":string,"profession":string,"locationName":string,"visualAppearance":{"clothing":string,"hair":string,"accessories":string[],"weapon":string,"apparentAge":string,"palette":string[]}}],"npcChanges":[{"name":string,"status":"active|dead|missing|departed","memory":string}],"opportunities":string[],"quests":[{"title":string,"description":string,"objective":string,"status":"active|completed|failed|abandoned"}],"worldChanges":string[],"items":[{"name":string,"description":string,"category":"consumable|tool|weapon|armor|accessory|material|quest|document|key|relic|narrative","rarity":"common|uncommon|rare|epic|legendary","weight":number,"value":number,"quantity":number,"origin":string,"narrativeEffects":string[],"mechanicalEffects":[{"type":"restore_hp|restore_mana|attribute_bonus|skill_bonus|unlock_action|unlock_location|unlock_dialogue|unlock_profession|trigger_event|damage_bonus|defense_bonus","target":string,"value":number}],"durability":number|null}],"spells":[{"name":string,"fantasy":string,"suggestedType":"attack|healing|defense|control|utility|summoning|movement|narrative","suggestedPower":"low|medium|high","element":string,"origin":string}],"mechanicalEffects":[{"type":"damage_player|heal_player|restore_mana|change_gold|change_reputation","amount":number,"target":string,"reason":string}]}}.
@@ -62,11 +93,11 @@ Se um NPC ficou indisponível, registre npcChanges e crie ao menos uma oportunid
 Crie um NPC em worldDelta.npcs somente quando a ação atual fizer o jogador encontrar, observar ou provocar concretamente essa pessoa. O nome do novo NPC deve aparecer na narrativa deste mesmo turno; nunca preencha NPCs decorativos ou vindos de uma campanha anterior. Crie locais da mesma forma: apenas quando forem descobertos na narrativa, com nome próprio explícito. Procurar uma cidade não significa já ter encontrado uma.
 Quando houver rollResult, context.scene.previousNarrative é a cena imediatamente anterior ao dado. Continue diretamente dessa cena e resolva exatamente playerAction conforme die, total, difficulty, success e critical. Mostre uma consequência ficcional específica, perceptível e ligada às pessoas, objetos e perigos já presentes; não use frases genéricas como "o teste teve sucesso", "o teste falhou" ou "a situação muda". Não peça o mesmo teste novamente, não ofereça uma nova rolagem e devolva requiresDice false.
 memorySummary deve ter no máximo 900 caracteres e preservar origem, locais, pessoas, relações, eventos, objetivos e mudanças duradouras. Só consolide o resumo quando context.memory.mustConsolidateSummary for true; caso contrário, devolva o resumo atual. memoryUpdate contém apenas fatos canônicos permanentes, nunca detalhes triviais.
-Só sugira um item quando a narrativa disser explicitamente que o personagem o adquiriu, encontrou, recebeu, roubou ou fabricou. Use no máximo um item por turno. O nome exato precisa aparecer na narrativa. Todo item deve possuir pelo menos um efeito mecânico real e coerente; a Engine validará e poderá rejeitar a sugestão. Nunca altere diretamente o inventário.
+Só sugira itens quando a narrativa disser explicitamente que o personagem os adquiriu, pegou, guardou, recebeu, roubou, saqueou ou fabricou. Quando a posse for confirmada, inclua em worldDelta.items TODOS os objetos adquiridos no turno, inclusive armas de inimigos derrotados e cada conteúdo portátil de bolsas, recipientes ou corpos saqueados. Não limite a resposta a um item. O nome exato de cada objeto precisa aparecer na narrativa. Proponha efeitos mecânicos coerentes quando possível; a Engine completará efeitos ausentes com um padrão seguro. Nunca altere diretamente o inventário fora de worldDelta.items.
 Só sugira magia quando o personagem realmente a aprender por treino, mestre, item, descoberta ou consequência. A Engine define custo, dano, cura e cooldown. mechanicalEffects são sugestões factuais da consequência narrada; use valores pequenos e nunca altere estado apenas no texto. Se a ação do jogador for possível e não exigir dado, faça a situação avançar concretamente e preencha os deltas correspondentes. Nunca responda com uma paráfrase genérica da ação.
 actionInterpretation é apenas uma proposta semântica para a Engine validar. Interprete intenção, método, objeto, alvo, duração, risco e oposição; não escolha CD final. Use null quando a Engine já forneceu pendingRoll ou rollResult. Romance nunca é controle mental: Sedução usa Carisma para a qualidade da abordagem, enquanto perceber receptividade usa Sabedoria + Empatia, e nenhuma rolagem substitui consentimento, limites, personalidade ou objetivos do NPC.`;
   try {
-    const reply = await requestJson<GameMasterReply>(`${baseRules}\n${contract}`, JSON.stringify({ context, playerAction: action, rollResult: rollResult || null }), 1800);
+    const reply = await requestJson<GameMasterReply>(`${baseRules}\n${contract}`, JSON.stringify({ context, playerAction: action, rollResult: rollResult || null }), 2400);
     if (!reply) return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: 'Nenhum provedor narrativo está disponível.' };
     if (typeof reply.narrative !== 'string' || !reply.narrative.trim()) {
       return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: 'A IA retornou uma consequência narrativa vazia.' };
@@ -93,6 +124,7 @@ actionInterpretation é apenas uma proposta semântica para a Engine validar. In
     }
     reply.narrative = cleanedNarrative;
     reply.worldDelta = validation.delta;
+    reply.worldDelta.items = inferConfirmedStoredItems(reply.narrative, reply.worldDelta.items);
     if (validation.contradictions.length) reply.memoryUpdate.push(...validation.contradictions.map(value => `Correção de consistência: ${value}`));
     return { reply, mode: 'ai' };
   } catch (error) {

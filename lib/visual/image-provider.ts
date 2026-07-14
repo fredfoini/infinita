@@ -51,19 +51,20 @@ function derivedPrompt(kind: VisualAssetKind, descriptor: SceneVisualDescriptor,
 
 async function requestImage(config: ReturnType<typeof providerConfiguration>, prompt: string, kind: VisualAssetKind, parent?: VisualAsset | null) {
   const size = kind === 'character-sheet' || kind === 'motion-sheet' ? '1536x768' : kind === 'item-icon' ? '1024x1024' : '1536x1024';
+  const quality = kind === 'scene' ? (process.env.IMAGE_SCENE_QUALITY || 'high') : 'medium';
   if (parent?.fileUrl) {
     const parentResponse = await fetch(parent.fileUrl);
     if (!parentResponse.ok) throw new Error(`PARENT_ASSET_${parentResponse.status}`);
     const length = Number(parentResponse.headers.get('content-length') || 0);
     if (length > 49_000_000) throw new Error('PARENT_ASSET_TOO_LARGE');
     const form = new FormData();
-    form.append('model', config.model); form.append('prompt', prompt); form.append('size', size); form.append('quality', 'medium');
+    form.append('model', config.model); form.append('prompt', prompt); form.append('size', size); form.append('quality', quality);
     form.append('image[]', new Blob([await parentResponse.arrayBuffer()], { type: parentResponse.headers.get('content-type') || 'image/png' }), 'parent.png');
     return fetch(config.editEndpoint, { method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}` }, body: form });
   }
   return fetch(config.generationEndpoint, {
     method: 'POST', headers: { Authorization: `Bearer ${config.apiKey}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: config.model, prompt, size, quality: 'medium', n: 1 }),
+    body: JSON.stringify({ model: config.model, prompt, size, quality, n: 1 }),
   });
 }
 
@@ -90,17 +91,24 @@ export async function generateVisualAsset(input: SceneVisualDescriptor, options:
   const payload = await response.json() as ImagePayload;
   let bytes = await responseBytes(payload.data?.[0] || {});
   if (kind === 'character-sheet' || kind === 'motion-sheet') bytes = await removeGreenChroma(bytes);
+  if (kind === 'scene') {
+    bytes = await sharp(bytes)
+      .resize(1536, 864, { fit: 'cover', position: 'centre', kernel: sharp.kernel.lanczos3 })
+      .sharpen({ sigma: .55 })
+      .png({ compressionLevel: 9, palette: false })
+      .toBuffer();
+  }
   const fileUrl = `data:image/png;base64,${bytes.toString('base64')}`;
   const createdAt = new Date().toISOString();
   const id = `${sceneVisualHash(safeDescriptor)}-${kind}-${Date.now().toString(36)}`;
   const parent = options.parentAsset;
   const asset: VisualAsset = {
-    id, fileUrl, provider: config.provider, model: config.model, promptVersion: 'infinita-lineage-v1', createdAt,
+    id, fileUrl, provider: config.provider, model: config.model, promptVersion: kind === 'scene' ? 'infinita-scene-hd-v2' : 'infinita-lineage-v1', createdAt,
     createdByCampaignId: descriptor.campaignId, genreTags: [descriptor.genre], primaryEmotion: descriptor.primaryEmotion,
     secondaryEmotions: descriptor.secondaryEmotions, locationTags: [descriptor.locationType], actionTags: [descriptor.actionType],
     environmentTags: descriptor.environmentTags, characterTags: descriptor.characterArchetypes, intensity: descriptor.intensity,
     safeForReuse: moderation.mode !== 'reject', moderationStatus: moderation.mode === 'direct' ? 'approved' : moderation.mode === 'reject' ? 'rejected' : 'sanitized',
-    qualityScore: .86, reuseCount: 0, perceptualHash: sceneVisualHash(safeDescriptor), sceneDescriptorSnapshot: { ...safeDescriptor, campaignId: 'shared', sceneId: id },
+    qualityScore: kind === 'scene' ? .94 : .86, reuseCount: 0, perceptualHash: sceneVisualHash(safeDescriptor), sceneDescriptorSnapshot: { ...safeDescriptor, campaignId: 'shared', sceneId: id },
     assetKind: kind, semanticKey: options.semanticKey || sceneVisualHash(safeDescriptor), parentAssetId: parent?.id,
     rootAssetId: parent?.rootAssetId || parent?.id, lineageGeneration: (parent?.lineageGeneration || 0) + 1,
     playerPromptInfluence: playerPrompt.slice(0, 600), global: false,

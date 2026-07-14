@@ -13,6 +13,7 @@ import {
 import type { VisualAsset } from '@/lib/visual/types';
 
 export const VisualFallbackService = { mode: 'parchment' as const };
+const HD_SCENE_PROMPT_VERSION = 'infinita-scene-hd-v2';
 
 type SceneVisualProps = {
   state: GameState;
@@ -40,11 +41,10 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
       // An illustration already attached to this block is immutable for all ten actions.
       if (cycle.activeIllustrationId) {
         const exact = await getVisualAsset(cycle.activeIllustrationId).catch(() => null);
-        if (!cancelled && exact) { setAsset(exact); setStatus('cache'); }
-        return;
+        if (!cancelled && exact?.promptVersion === HD_SCENE_PROMPT_VERSION) { setAsset(exact); setStatus('cache'); return; }
       }
 
-      const assets = await listVisualAssets().catch(() => []);
+      const assets = (await listVisualAssets().catch(() => [])).filter(candidate => candidate.promptVersion === HD_SCENE_PROMPT_VERSION);
       if (cancelled) return;
       updateVisualMetrics({ requests: 1 });
       const match = findBestVisualAsset(descriptor, assets, []);

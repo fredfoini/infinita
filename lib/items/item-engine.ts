@@ -48,7 +48,6 @@ export function materializeItemSuggestion(state: GameState, suggestion: NonNulla
   if (state.character.inventory.some(item => item.name.toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'))) return null;
   const category: ItemCategory = Object.hasOwn(CATEGORY_TO_KIND, suggestion.category) ? suggestion.category : 'narrative';
   const validEffects = (suggestion.mechanicalEffects || []).filter(effect => ALLOWED_EFFECTS.has(effect.type));
-  if (!validEffects.length) return null;
   return normalizeItem({
     name, description, category, rarity: suggestion.rarity || 'common', weight: suggestion.weight || .2, value: suggestion.value || 1, quantity: suggestion.quantity || 1,
     origin: suggestion.origin, effects: { narrative: suggestion.narrativeEffects || [], mechanical: validEffects },
@@ -60,7 +59,7 @@ export function registerSuggestedItems(inputState: GameState, suggestions: Narra
   if (!suggestions?.length) return { state: inputState, created: [] as Item[] };
   const state = inputState;
   const created: Item[] = [];
-  for (const suggestion of suggestions.slice(0, 1)) {
+  for (const suggestion of suggestions.slice(0, 12)) {
     const item = materializeItemSuggestion(state, suggestion, narrative);
     if (!item) continue;
     state.character.inventory.push(item);
