@@ -1,11 +1,13 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import type { GameState } from '@/lib/engine';
+import { currentLocation, type GameState } from '@/lib/engine';
+import Logo from '@/components/Logo';
 
 export default function IntroSequence({ campaign, onComplete }: { campaign: GameState; onComplete: () => void }) {
   const [elapsed, setElapsed] = useState(0);
   const audioRef = useRef<AudioContext | null>(null);
+  const location = currentLocation(campaign);
 
   useEffect(() => {
     const started = performance.now();
@@ -38,11 +40,11 @@ export default function IntroSequence({ campaign, onComplete }: { campaign: Game
       <div className="intro-mountains back" /><div className="intro-mountains front" />
       <div className="intro-forest"><i/><i/><i/><i/><i/><i/></div>
       <div className="intro-road" />
-      <div className="intro-village" />
+      <div className={`intro-village ${location.kind}`} />
       <div className="intro-hero" />
       <div className="intro-portal"><i /><span>✦</span></div>
       <div className="intro-leaves"><i/><i/><i/><i/><i/></div>
-      <div className="intro-brand"><span>INFINITA</span><small>{campaign.character.name} · {campaign.character.className}</small></div>
+      <div className="intro-brand"><Logo variant="intro" priority/><small>{campaign.character.name} · {campaign.character.className} · {location.name}</small></div>
       <div className="intro-message"><p>Uma nova aventura criada por você,<br/>como quiser, começa agora…</p>{elapsed >= 11.5 && <button type="button" onClick={finish}>COMEÇAR JORNADA</button>}</div>
       <div className="intro-progress"><i style={{ width: `${Math.min(100, elapsed / 12 * 100)}%` }} /></div>
     </section>

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generatedAt": "2026-07-13T22:37:38.483Z",
+  "generatedAt": "2026-07-13T23:57:54.677Z",
   "visualStandard": {
     "era": "16-bit handheld",
     "nativeScene": {
@@ -28,7 +28,7 @@
       "layers": [
         "character"
       ],
-      "variants": 32,
+      "variants": 28,
       "animations": [
         "idle-2-frame"
       ],
@@ -54,7 +54,7 @@
       "layers": [
         "source"
       ],
-      "variants": 32,
+      "variants": 28,
       "animations": [],
       "compatibility": [
         "tooling"

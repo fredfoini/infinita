@@ -1,17 +1,18 @@
 'use client';
 
 import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
-import ProceduralScene from '@/components/ProceduralScene';
 import AmbientAudio from '@/components/AmbientAudio';
 import IntroSequence from '@/components/IntroSequence';
-import { createInitialState, currentLocation, migrateState, productPrice, xpProgress, type AttributeKey, type GameState, type NewCampaignInput, type RollResult } from '@/lib/engine';
+import Logo from '@/components/Logo';
+import SceneVisual from '@/components/SceneVisual';
+import { createInitialState, currentLocation, migrateState, productPrice, setActiveIllustration, xpProgress, type AttributeKey, type GameState, type NewCampaignInput, type RollResult } from '@/lib/engine';
 
-type StoredCampaigns = { version: 4; campaigns: GameState[]; active?: string };
+type StoredCampaigns = { version: 7; campaigns: GameState[]; active?: string };
 type TurnReply = { state?: GameState; narrative?: string; requiresDice?: boolean; rollResult?: RollResult | null; mode?: string; warning?: string; error?: string };
 type Panel = 'inventory' | 'map' | 'journal' | 'quests' | 'character';
 
-const STORAGE_KEY = 'infinita-campaigns-v4';
-const LEGACY_KEYS = ['infinita-campaigns-v3'];
+const STORAGE_KEY = 'infinita-campaigns-v7';
+const LEGACY_KEYS = ['infinita-campaigns-v6', 'infinita-campaigns-v5', 'infinita-campaigns-v4', 'infinita-campaigns-v3'];
 const CLASS_OPTIONS = [
   { name: 'Guerreiro', icon: '⚔', text: 'Resiste à pressão e domina confrontos diretos.' },
   { name: 'Explorador', icon: '⌖', text: 'Lê trilhas, ruínas e os sinais do mundo.' },
@@ -26,12 +27,12 @@ function readCampaigns(): StoredCampaigns {
       if (!raw) continue;
       const parsed = JSON.parse(raw) as { campaigns?: unknown[]; active?: string };
       const campaigns = (parsed.campaigns || []).map(migrateState).filter((value): value is GameState => Boolean(value));
-      if (campaigns.length) return { version: 4, campaigns, active: campaigns.some(item => item.campaignId === parsed.active) ? parsed.active : campaigns[0].campaignId };
+      if (campaigns.length) return { version: 7, campaigns, active: campaigns.some(item => item.campaignId === parsed.active) ? parsed.active : campaigns[0].campaignId };
     } catch {
       // Um save corrompido não impede a abertura do jogo.
     }
   }
-  return { version: 4, campaigns: [] };
+  return { version: 7, campaigns: [] };
 }
 
 async function api<T>(url: string, body: unknown): Promise<T> {
@@ -49,6 +50,7 @@ export default function Game() {
   const [panel, setPanel] = useState<Panel>('inventory');
   const [characterName, setCharacterName] = useState('');
   const [campaignName, setCampaignName] = useState('');
+  const [openingPrompt, setOpeningPrompt] = useState('');
   const [selectedClass, setSelectedClass] = useState('Explorador');
   const [customClass, setCustomClass] = useState('');
   const [action, setAction] = useState('');
@@ -71,7 +73,7 @@ export default function Game() {
 
   useEffect(() => {
     if (!loaded) return;
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 4, campaigns, active: activeId } satisfies StoredCampaigns));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: 7, campaigns, active: activeId } satisfies StoredCampaigns));
   }, [campaigns, activeId, loaded]);
 
   useEffect(() => {
@@ -98,12 +100,17 @@ export default function Game() {
   }, [current?.campaignId, current?.session.pendingRoll?.id, busy]);
 
   const update = (next: GameState) => setCampaigns(list => list.map(campaign => campaign.campaignId === next.campaignId ? next : campaign));
+  const resolveIllustration = (assetId: string, generated: boolean) => setCampaigns(list => list.map(campaign =>
+    campaign.campaignId === activeId && campaign.visualCycle.activeIllustrationId !== assetId
+      ? setActiveIllustration(campaign, assetId, generated)
+      : campaign,
+  ));
 
   async function createCampaign(event: FormEvent) {
     event.preventDefault();
     const className = customClass.trim() || selectedClass;
-    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className };
-    if (!input.characterName || !input.campaignName || !input.className || busy) return;
+    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className, openingPrompt: openingPrompt.trim() };
+    if (!input.characterName || !input.campaignName || !input.className || !input.openingPrompt || busy) return;
     setBusy(true);
     setNotice('Criando um mundo para este personagem...');
     try {
@@ -161,16 +168,15 @@ export default function Game() {
     if (activeId === id) setActiveId(undefined);
   }
 
-  if (!loaded) return <main className="loading-screen">CARREGANDO INFINITA...</main>;
+  if (!loaded) return <main className="loading-screen"><Logo variant="loading" priority/><span>CARREGANDO MUNDO...</span></main>;
 
   if (intro) return <IntroSequence campaign={intro} onComplete={() => setIntro(null)} />;
 
   if (menu || !current) {
     return <main className="premium-menu">
       <section className="game-menu">
-        <div className="menu-rune" aria-hidden="true">◆</div>
+        <Logo variant="menu" priority/>
         <p className="eyebrow">INFINITA ENGINE</p>
-        <h1>INFINITA</h1>
         <p className="subtitle">Um mundo que se lembra de cada consequência.</p>
         {campaigns.length > 0 && <section className="save-slots">
           <h2>CONTINUAR JORNADA</h2>
@@ -189,6 +195,7 @@ export default function Game() {
             <label>NOME DO PERSONAGEM<input value={characterName} onChange={event => setCharacterName(event.target.value)} maxLength={60} placeholder="Quem enfrentará o mundo?" /></label>
             <label>NOME DA CAMPANHA<input value={campaignName} onChange={event => setCampaignName(event.target.value)} maxLength={80} placeholder="O nome desta crônica" /></label>
           </div>
+          <label className="opening-seed">COMO SUA HISTÓRIA COMEÇA?<textarea value={openingPrompt} onChange={event => setOpeningPrompt(event.target.value)} maxLength={700} required placeholder="Ex.: Sou um ferreiro falido. Acordei em um navio pirata. Sou um músico viajante em busca de trabalho..." /><small>Esta situação será a semente de todo o mundo. Não existe campanha principal predefinida.</small></label>
           <label>ARQUÉTIPOS SUGERIDOS</label>
           <div className="class-grid">
             {CLASS_OPTIONS.map(option => <button type="button" key={option.name} className={`class-card ${selectedClass === option.name && !customClass ? 'active' : ''}`} onClick={() => { setSelectedClass(option.name); setCustomClass(''); }}>
@@ -196,7 +203,7 @@ export default function Game() {
             </button>)}
           </div>
           <label>OU CRIE QUALQUER CLASSE<input className="custom-class" value={customClass} onChange={event => setCustomClass(event.target.value)} maxLength={80} placeholder="Ex.: Cartógrafo de Sonhos, Ferreiro Errante..." /></label>
-          <button className="launch" disabled={busy || !characterName.trim() || !campaignName.trim()}>{busy ? 'CRIANDO MUNDO...' : 'INICIAR JORNADA'}</button>
+          <button className="launch" disabled={busy || !characterName.trim() || !campaignName.trim() || !openingPrompt.trim()}>{busy ? 'CRIANDO MUNDO...' : 'INICIAR JORNADA'}</button>
         </form>
         {notice && <p className="menu-notice">{notice}</p>}
       </section>
@@ -209,13 +216,13 @@ export default function Game() {
     <div className="console-label">● INFINITA ADVANCE</div>
     <div className="shell">
       <header>
-        <div className="logo"><i className="rune" /><span>INFINITA</span></div>
-        <div className="header-status"><AmbientAudio location={location?.name || 'Norwich'} /><button type="button" className="mobile-menu-toggle" onClick={() => setDrawerOpen(open => !open)}>MENU</button><small>{current.campaign.name.toUpperCase()} · NÍVEL {current.character.level} · D{current.world.day} · {String(current.world.hour).padStart(2, '0')}:00</small></div>
+        <Logo variant="header" priority/>
+        <div className="header-status"><AmbientAudio location={location?.name || 'Cena Inicial'} /><button type="button" className="mobile-menu-toggle" onClick={() => setDrawerOpen(open => !open)}>MENU</button><small>{current.campaign.name.toUpperCase()} · NÍVEL {current.character.level} · D{current.world.day} · {String(current.world.hour).padStart(2, '0')}:00</small></div>
       </header>
       <div className="grid">
         <section className="adventure">
           <div className="scene generated">
-            <ProceduralScene location={location?.name || 'Norwich'} className={current.character.className} seed={current.campaignId} weather={current.world.weather} hour={current.world.hour} />
+            <SceneVisual state={current} onIllustrationResolved={resolveIllustration} />
             <div className="scene-name">{location?.name} · {current.world.weather}</div>
           </div>
           <article className="narrative" aria-live="polite">
@@ -245,9 +252,9 @@ export default function Game() {
           </nav>
           {panel === 'inventory' && <section className="side-panel"><h3>INVENTÁRIO</h3><ul>{current.character.inventory.map(item => <li key={item.id}><span>› {item.name}{item.quantity > 1 ? ` ×${item.quantity}` : ''}</span>{item.kind === 'consumível' ? <button type="button" className="mini-action" disabled={busy} onClick={() => void sendTurn('useItem', undefined, { itemId: item.id })}>USAR</button> : <em>{item.value} G</em>}</li>)}</ul></section>}
           {panel === 'character' && <section className="side-panel"><h3>ATRIBUTOS {current.character.attributePoints > 0 && `· ${current.character.attributePoints} PONTO`}</h3><ul>{Object.entries(current.character.attributes).map(([name, value]) => <li key={name}><span>› {name}</span>{current.character.attributePoints > 0 && value < 20 ? <button type="button" className="mini-action" disabled={busy} onClick={() => void sendTurn('attribute', undefined, { attribute: name as AttributeKey })}>+ {value}</button> : <em>{value}</em>}</li>)}</ul><hr /><h3>PERÍCIAS</h3><ul>{Object.values(current.character.skills).filter(skill => skill.trained || skill.xp > 0).slice(0, 8).map(skill => <li key={skill.id}>› {skill.name}<em>{skill.rank}</em></li>)}</ul></section>}
-          {panel === 'quests' && <section className="side-panel"><h3>MISSÕES</h3>{current.campaign.quests.map(quest => <article className="quest" key={quest.id}><b>{quest.title}</b><span>{quest.status === 'completed' ? 'CONCLUÍDA' : quest.description}</span>{quest.objectives.map(objective => <small key={objective.id}>{objective.completed ? '✓' : '□'} {objective.text}</small>)}</article>)}<hr /><h3>REPUTAÇÃO</h3><p className="rep">Norwich {current.world.reputation.cities.norwich || 0}<br />Moral percebida {current.world.reputation.moral}</p></section>}
-          {panel === 'journal' && <section className="side-panel"><h3>MEMÓRIA DA CAMPANHA</h3><p className="journal-summary">{current.campaign.memory.summary}</p><hr/><h3>ÚLTIMOS ACONTECIMENTOS</h3>{current.world.timeline.slice(-6).reverse().map(event => <p className="journal-event" key={event.id}>D{current.world.day} · {event.text}</p>)}</section>}
-          {panel === 'map' && <section className="side-panel"><h3>LOCAIS DESCOBERTOS</h3><ul>{Object.values(current.world.locations).filter(place => place.discovered).map(place => <li key={place.id}><span>{place.id === current.world.currentLocationId ? '◆' : '◇'} {place.name}</span><em>{place.region}</em></li>)}</ul><hr/><h3>PESSOAS PRESENTES</h3>{Object.values(current.world.npcs).filter(npc => npc.locationId === current.world.currentLocationId).map(npc => <article className="quest" key={npc.id}><b>{npc.name}</b><span>{npc.role} · {npc.profession}</span><small>Relação: {npc.relationship}</small></article>)}<hr/><h3>LOJA LOCAL</h3>{Object.values(current.world.economy.shops).filter(shop => shop.locationId === current.world.currentLocationId).map(shop => <article key={shop.id}><b className="shop-name">{shop.name}</b><ul>{shop.products.map(product => <li key={product.id}><span>{product.name} · {product.stock}</span><button type="button" className="mini-action" disabled={busy || product.stock < 1 || current.character.gold < productPrice(current, product)} onClick={() => void sendTurn('buyItem', undefined, { shopId: shop.id, productId: product.id })}>{productPrice(current, product)} G</button></li>)}</ul></article>)}</section>}
+          {panel === 'quests' && <section className="side-panel"><h3>OBJETIVOS EMERGENTES</h3>{current.campaign.quests.length ? current.campaign.quests.map(quest => <article className="quest" key={quest.id}><b>{quest.title}</b><span>{quest.status === 'completed' ? 'CONCLUÍDO' : quest.status === 'active' ? quest.description : quest.status.toUpperCase()}</span>{quest.objectives.map(objective => <small key={objective.id}>{objective.completed ? '✓' : '□'} {objective.text}</small>)}</article>) : <p className="rep">Nenhum objetivo foi imposto. Eles surgirão das suas escolhas.</p>}<hr /><h3>OPORTUNIDADES</h3>{current.campaign.opportunities.length ? current.campaign.opportunities.map(opportunity => <p className="journal-event" key={opportunity}>◇ {opportunity}</p>) : <p className="rep">O mundo ainda está revelando possibilidades.</p>}<hr /><h3>REPUTAÇÃO</h3><p className="rep">{location?.name || 'Local atual'} {current.world.reputation.cities[current.world.currentLocationId] || 0}<br />{location?.region || 'Região'} {current.world.reputation.regions[location?.region || ''] || 0}<br />Moral percebida {current.world.reputation.moral}</p></section>}
+          {panel === 'journal' && <section className="side-panel"><h3>MEMÓRIA DA CAMPANHA</h3><p className="journal-summary">{current.campaign.memory.campaignSummary.text}</p><hr/><h3>ÂNCORA NARRATIVA</h3><p className="rep">{current.campaign.memory.anchor.currentObjective || 'Nenhum objetivo atual imposto.'}<br/>{current.campaign.memory.anchor.themes.join(' · ')}</p><hr/><h3>FATOS CANÔNICOS</h3>{current.campaign.memory.canon.slice(-5).reverse().map(fact => <p className="journal-event" key={fact.id}>{fact.text}</p>)}<hr/><h3>ÚLTIMOS ACONTECIMENTOS</h3>{current.world.timeline.slice(-6).reverse().map(event => <p className="journal-event" key={event.id}>D{current.world.day} · {event.text}</p>)}</section>}
+          {panel === 'map' && <section className="side-panel"><h3>LOCAIS DESCOBERTOS</h3><ul>{Object.values(current.world.locations).filter(place => place.discovered).map(place => <li key={place.id}><span>{place.id === current.world.currentLocationId ? '◆' : '◇'} {place.name}</span><em>{place.region}</em></li>)}</ul><hr/><h3>PESSOAS PRESENTES</h3>{Object.values(current.world.npcs).filter(npc => npc.locationId === current.world.currentLocationId && npc.status === 'active').map(npc => <article className="quest" key={npc.id}><b>{npc.name}</b><span>{npc.role} · {npc.profession}</span><small>Relação: {npc.relationship}</small></article>)}{Object.values(current.world.npcs).filter(npc => npc.status !== 'active').length > 0 && <><hr/><h3>PESSOAS AUSENTES</h3>{Object.values(current.world.npcs).filter(npc => npc.status !== 'active').map(npc => <p className="journal-event" key={npc.id}>{npc.name} · {npc.status}</p>)}</>}<hr/><h3>CULTURA LOCAL</h3><p className="rep">{current.world.culture.name}<br/>{current.world.culture.notes}</p><hr/><h3>LOJA LOCAL</h3>{Object.values(current.world.economy.shops).filter(shop => shop.locationId === current.world.currentLocationId).map(shop => <article key={shop.id}><b className="shop-name">{shop.name}</b><ul>{shop.products.map(product => <li key={product.id}><span>{product.name} · {product.stock}</span><button type="button" className="mini-action" disabled={busy || product.stock < 1 || current.character.gold < productPrice(current, product)} onClick={() => void sendTurn('buyItem', undefined, { shopId: shop.id, productId: product.id })}>{productPrice(current, product)} G</button></li>)}</ul></article>)}</section>}
         </aside>
       </div>
       <section className="events">

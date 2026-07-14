@@ -11,8 +11,9 @@ export async function POST(request: Request) {
       campaignName: body.campaignName?.trim().slice(0, 80) || '',
       characterName: body.characterName?.trim().slice(0, 60) || '',
       className: body.className?.trim().slice(0, 80) || '',
+      openingPrompt: body.openingPrompt?.trim().slice(0, 700) || '',
     };
-    if (!input.campaignName || !input.characterName || !input.className) return NextResponse.json({ error: 'Preencha campanha, personagem e classe.' }, { status: 400 });
+    if (!input.campaignName || !input.characterName || !input.className || !input.openingPrompt) return NextResponse.json({ error: 'Preencha campanha, personagem, classe e como a história começa.' }, { status: 400 });
     let state = createInitialState(input);
     const generation = await generateCampaign(input, state);
     if (generation.genesis) state = applyGenesis(state, generation.genesis);

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { acceptNarrative, acceptSuggestedRoll, beginAction, buyProduct, migrateState, resolvePendingRoll, spendAttributePoint, useInventoryItem, type AttributeKey } from '@/lib/engine';
+import { acceptNarrative, acceptSuggestedRoll, applyNarrativeWorldDelta, beginAction, buyProduct, migrateState, resolvePendingRoll, spendAttributePoint, useInventoryItem, type AttributeKey } from '@/lib/engine';
 import { narrateTurn } from '@/lib/game-master';
 
 export const runtime = 'nodejs';
@@ -34,7 +34,8 @@ export async function POST(request: Request) {
       if (!action) return NextResponse.json({ error: 'Não há rolagem pendente.' }, { status: 409 });
       const resolved = resolvePendingRoll(state);
       const narration = await narrateTurn(resolved.state, action, resolved.fallbackNarrative, resolved.result);
-      const next = acceptNarrative(resolved.state, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate);
+      const evolved = applyNarrativeWorldDelta(resolved.state, narration.reply.worldDelta);
+      const next = acceptNarrative(evolved, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate, narration.reply.worldDelta);
       return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: false, roll: null, rollResult: resolved.result, events: resolved.events, mode: narration.mode, warning: narration.error });
     }
 
@@ -46,7 +47,8 @@ export async function POST(request: Request) {
     if (!next.session.pendingRoll && narration.reply.requiresDice) {
       next = acceptSuggestedRoll(next, action, { skill: narration.reply.skill, attribute: narration.reply.attribute, difficulty: narration.reply.difficulty, reason: narration.reply.reason });
     }
-    next = acceptNarrative(next, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate);
+    next = applyNarrativeWorldDelta(next, narration.reply.worldDelta);
+    next = acceptNarrative(next, narration.reply.narrative, narration.reply.memorySummary, narration.reply.memoryUpdate, narration.reply.worldDelta);
     return NextResponse.json({ state: next, narrative: next.session.narrative, requiresDice: Boolean(next.session.pendingRoll), roll: next.session.pendingRoll, rollResult: null, events: turn.events, mode: narration.mode, warning: narration.error });
   } catch (error) {
     console.error('INFINITA turn failed', error);
