@@ -1,6 +1,6 @@
 # INFINITA Engine - Narrative Memory + Visual Bank
 
-RPG emergente em Next.js. O mestre textual usa failover transparente Groq → Gemini → OpenAI; a Engine TypeScript continua sendo a única autoridade sobre estado, dados, XP, atributos, inventário, combate, economia, objetivos e persistência. A camada visual alterna blocos de pergaminho e ilustração, consultando o banco antes de solicitar uma nova imagem à OpenAI.
+RPG emergente em Next.js. O mestre textual usa failover transparente Groq → Gemini → OpenAI; a Engine TypeScript continua sendo a única autoridade sobre estado, dados, XP, atributos, inventário, combate, economia, objetivos e persistência. A camada visual compõe cenários, personagem e NPCs persistentes a partir de atlas locais; a geração externa ficou restrita a ambientes inéditos que não existam no banco visual.
 
 ## Executar e validar
 
@@ -32,7 +32,7 @@ Imagem (opcional):
 
 Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o turno. Um circuit breaker interrompe tentativas repetidas e o jogador recebe imediatamente o melhor asset local ou o fallback estático.
 
-## Memória narrativa e estado v7
+## Memória narrativa e estado v8
 
 - `World Genesis`: prompt original integral e resumo estruturado imutável da origem.
 - `Canon Memory`: fatos permanentes, mortes, partidas, mudanças mundiais e conclusões.
@@ -44,6 +44,18 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 
 `lib/memory/memory-builder.ts` reconstrói somente o contexto relevante antes de cada chamada ao modelo. O validador impede que NPCs mortos, desaparecidos ou que partiram sejam recriados como ativos. Saves v2–v6 são migrados para v7 no carregamento. Antes da migração no navegador, o conteúdo original recebe uma cópia em `infinita-migration-backup:*` para rollback manual.
 
+## Dynamic Skill & Test Engine
+
+- `lib/skills/skill-semantic-resolver.ts` interpreta verbo, objeto, alvo, método, duração, oposição e contexto antes de classificar o domínio da ação.
+- `lib/skills/test-selection-validator.ts` centraliza aliases, deduplicação, matriz atributo–perícia, CDs padronizadas e auditoria. Uma proposta da LLM nunca é aplicada sem validação.
+- `lib/skills/skill-check-engine.ts` é a única fórmula para `d20 + atributo + perícia + contexto`, incluindo vantagem, desvantagem, oposição e cinco graus de resultado.
+- Perícias treináveis surgem organicamente, são persistidas com uso/sucesso/falha e evoluem de Novato a Lendário. Ações triviais não criam perícias nem pedem dado.
+- XP de perícia considera dificuldade, novidade e repetição recente; spam idêntico cai rapidamente para zero.
+- Cada decisão fica em `world.skillAudits`, com intenção, domínio, proposta da LLM, seleção da Engine, correções, CD e justificativa. A HUD só mostra a auditoria em desenvolvimento.
+- Romance separa abordagem (`Carisma + Sedução`) de leitura de receptividade (`Sabedoria + Empatia`); nenhuma rolagem substitui consentimento, limites ou objetivos do NPC.
+- Ao concluir um D20, a Engine fixa o resultado mecânico e a IA narra a consequência usando a cena anterior. Se todos os provedores falharem, o teste permanece pendente e o mesmo resultado é preservado no retry, sem texto genérico.
+- Saves v2–v7 migram para o schema v8. O navegador mantém o backup original e `world.skillMigrationBackup` preserva as perícias antes da normalização segura.
+
 ## Consistência transacional v2
 
 - Cada ação recebe `requestId`, convertido em `turnId`; IDs já processados não reaplicam efeitos.
@@ -53,10 +65,20 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 - O mapa aceita tipos emergentes de local, preserva conexões, visita, estado, presença de NPCs e um único local atual.
 - HP, mana e energia têm limites persistidos e a HUD lê diretamente o save.
 
+## Identidade visual persistente
+
+- `lib/visual/sprite-system.ts` cria e migra uma identidade determinística para jogador e NPCs importantes sem regenerá-los a cada cena.
+- `public/assets/hero-sprite-sheet-v1.png` contém idle, caminhada, ataque, magia, conversa, celebração, dano, morte e ações de mundo.
+- `public/assets/world-scene-atlas-v1.png` oferece oito ambientes originais reutilizáveis: vila, taverna, floresta, rio, mina, castelo, loja e montanha.
+- `components/LayeredWorldScene.tsx` compõe fundo, iluminação por horário, clima, objetos animados, NPCs e jogador em câmera fixa.
+- O mesmo sprite aparece no menu, cutscene, HUD e mundo. Classe, descrição e personalidade ficam persistidas no save v8.
+- A interface usa paleta natural, superfícies opacas, molduras de madeira/pedra e tipografia pixel; não depende de neon, vidro ou efeitos futuristas.
+
 ## Ciclo visual persistente
 
-- Ações válidas 1–10: GIF 8-bit local `ui_story_parchment_writing_v1`, construído na mesma direção de arte GBA das ilustrações.
-- Ações válidas 11–20: uma ilustração escolhida do cache ou gerada uma única vez.
+- O pergaminho 8-bit local continua sendo usado em carregamentos e transições narrativas.
+- Locais conhecidos usam sempre o atlas local, sem custo de API e sem bloquear o turno.
+- Somente um tipo de local realmente desconhecido consulta o cache e, se permitido, solicita uma ilustração de ambiente sem personagens.
 - O padrão se repete, e a mesma imagem permanece por todo o bloco ilustrado.
 - Cliques em menus não contam; texto aceito, dado concluído e escolhas contextuais persistidas contam.
 - Se a OpenAI estiver indisponível, o jogo usa o melhor cache e depois o pergaminho, sem interromper texto ou input.
@@ -93,8 +115,8 @@ O modelo pode apenas sugerir `worldDelta.items`. A Engine exige que o nome apare
 ### Interface
 
 - Logo do menu reduzido aproximadamente 25%, sem alterar proporção.
-- Pequenos atores pixel art fazem corrida, duelo, treino, brincadeira e magia em loops discretos ao redor do logo.
-- Cutscene em sprites dura cinco segundos; `PULAR` permanece sempre disponível e `COMEÇAR JORNADA` surge em 3,5 segundos.
+- Pequenos atores pixel art ambientam o menu com caminhada, magia, leitura e um companheiro; os duelistas foram removidos.
+- A cutscene clássica de doze segundos, com amanhecer, viagem, vila, portal, logo e trilha procedural, foi restaurada. `PULAR` permanece sempre disponível.
 - Inventário usa fichas expansíveis com efeito, peso, raridade, durabilidade e ações contextuais.
 - Em telas pequenas, HUD vira interface de aplicativo com painel lateral e barra de ação fixa.
 
@@ -103,7 +125,7 @@ O modelo pode apenas sugerir `worldDelta.items`. A Engine exige que o nome apare
 - `lib/visual/scene-descriptor.ts`: produz o descritor semântico normalizado da cena.
 - `lib/visual/semantic-matcher.ts`: pontua emoção, gênero, ação, local, ambiente, intensidade, personagens e diversidade recente.
 - `lib/visual/moderation.ts`: converte pedidos inadequados em representações seguras e não gráficas.
-- `lib/visual/image-provider.ts`: adaptador do provedor, direção de arte GBA 16-bit e materialização do asset.
+- `lib/visual/image-provider.ts`: adaptador excepcional para ambientes originais em pixel art isométrica, sem personagens, e materialização do asset.
 - `lib/visual/visual-asset-repository.ts`: banco persistente IndexedDB, circuit breaker e métricas.
 - `app/api/visual`: geração opcional e resposta resiliente.
 - `components/SceneVisual.tsx`: consulta cache, gera sem bloquear e aplica fallback.

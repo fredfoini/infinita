@@ -3,12 +3,10 @@ export type Attributes = Record<AttributeKey, number>;
 export type EventKind = 'action' | 'roll' | 'xp' | 'skill' | 'level' | 'item' | 'gold' | 'reputation' | 'quest' | 'world' | 'combat' | 'magic' | 'system';
 export type SkillRank = 'Iniciante' | 'Aprendiz' | 'Competente' | 'Especialista' | 'Mestre' | 'Lendário';
 
-export type Skill = {
-  id: string;
-  name: string;
+export type Skill = import('@/lib/skills/types').DynamicSkill & {
+  /** Aliases legados mantidos para HUD e saves anteriores. */
   attribute: AttributeKey;
   xp: number;
-  level: number;
   rank: SkillRank;
   trained: boolean;
 };
@@ -62,6 +60,11 @@ import { advanceVisualCycle, attachCycleIllustration, createVisualCycle, migrate
 import { equipmentEffectTotal, executeItemAction, normalizeItem, registerSuggestedItems, type ItemActionInput } from '@/lib/items/item-engine';
 import { reduceGameEvents, type EventDraft, type GameEventType } from '@/lib/events/event-bus';
 import { castSpell, learnSuggestedSpells, tickSpellCooldowns, type Spell, type SpellSuggestion } from '@/lib/magic/magic-engine';
+import { resolveActionSemantics, normalizeSemanticText } from '@/lib/skills/skill-semantic-resolver';
+import { CORE_TO_DISPLAY, DISPLAY_TO_CORE, canonicalSkill, materializeDynamicSkill, proficiencyForLevel, skillExperienceToNext, validateTestSelection } from '@/lib/skills/test-selection-validator';
+import { meaningfulSkillXp, progressDynamicSkill, resolveSkillCheck } from '@/lib/skills/skill-check-engine';
+import type { ActionInterpretation, CheckOutcome, ContextualModifier, CoreAttribute, SkillResolutionAudit } from '@/lib/skills/types';
+import { createSpriteIdentity, migrateSpriteIdentity, type SpriteIdentity } from '@/lib/visual/sprite-system';
 
 export type Quest = {
   id: string;
@@ -103,6 +106,7 @@ export type NPC = {
   status: 'active' | 'dead' | 'missing' | 'departed';
   memoryProfile: { firstImpression: string; sharedEvents: string[]; trust: number; favors: string[]; conflicts: string[]; pendingTopics: string[] };
   visualAppearance: { clothing: string; hair: string; accessories: string[]; weapon: string; apparentAge: string; palette: string[] };
+  sprite: SpriteIdentity;
 };
 
 export type Location = {
@@ -153,6 +157,19 @@ export type PendingRoll = {
   difficulty: number;
   reason: string;
   createdAtTurn: number;
+  coreAttribute: CoreAttribute;
+  skillId?: string;
+  domain: import('@/lib/skills/types').ActionDomain;
+  intent: string;
+  method: string;
+  opposed: boolean;
+  opposedBy?: { label: string; defense: number };
+  riskLevel: import('@/lib/skills/types').RiskLevel;
+  advantage: number;
+  disadvantage: number;
+  contextualModifiers: ContextualModifier[];
+  auditId: string;
+  consentRequired?: boolean;
 };
 
 export type RollResult = PendingRoll & {
@@ -162,6 +179,8 @@ export type RollResult = PendingRoll & {
   total: number;
   success: boolean;
   critical: 'success' | 'failure' | null;
+  outcome: CheckOutcome;
+  contextualBonus: number;
 };
 
 export type MemoryState = {
@@ -173,7 +192,7 @@ export type MemoryState = {
 };
 
 export type GameState = {
-  schemaVersion: 7;
+  schemaVersion: 8;
   campaignId: string;
   visualCycle: CampaignVisualCycle;
   campaign: {
@@ -189,6 +208,9 @@ export type GameState = {
   character: {
     name: string;
     className: string;
+    personality: string;
+    appearanceDescription: string;
+    sprite: SpriteIdentity;
     origin: string;
     profession: string;
     birthRegion: string;
@@ -232,6 +254,8 @@ export type GameState = {
     reputation: Reputation;
     timeline: GameEvent[];
     processedTurnIds: string[];
+    skillAudits: SkillResolutionAudit[];
+    skillMigrationBackup: Array<{ originalKey: string; skill: unknown }>;
   };
   session: {
     turn: number;
@@ -256,7 +280,7 @@ export type GameState = {
   };
 };
 
-export type NewCampaignInput = { campaignName: string; characterName: string; className: string; openingPrompt: string };
+export type NewCampaignInput = { campaignName: string; characterName: string; className: string; openingPrompt: string; personality?: string; appearanceDescription?: string };
 
 export type NarrativeWorldDelta = {
   locations?: Array<{ name: string; region: string; kind: Location['kind']; description: string; visualIdentity?: Partial<Location['visualIdentity']> }>;
@@ -318,16 +342,22 @@ export function attributeModifier(value: number) {
   return Math.floor((value - 10) / 2);
 }
 
-function skillThreshold(level: number) {
-  return 12 + level * level * 8;
-}
-
 function rankFor(level: number): SkillRank {
   return SKILL_RANKS[clamp(level - 1, 0, SKILL_RANKS.length - 1)];
 }
 
-function makeSkill(name: string, attribute: AttributeKey, trained = false): Skill {
-  return { id: uid(), name, attribute, xp: 0, level: 1, rank: 'Iniciante', trained };
+function legacyRank(rank: import('@/lib/skills/types').ProficiencyRank): SkillRank {
+  return ({ untrained: 'Iniciante', novice: 'Iniciante', apprentice: 'Aprendiz', competent: 'Competente', expert: 'Especialista', master: 'Mestre', legendary: 'Lendário' } as const)[rank];
+}
+
+function synchronizeSkillAliases(skill: import('@/lib/skills/types').DynamicSkill): Skill {
+  return { ...skill, attribute: CORE_TO_DISPLAY[skill.primaryAttribute], xp: skill.experience, rank: legacyRank(skill.proficiencyRank), trained: skill.proficiencyRank !== 'untrained' };
+}
+
+function makeSkill(name: string, attribute: AttributeKey, trained = false, campaignId = '', characterId = '', sourceAction?: string, createdDynamically = false): Skill {
+  const definition = canonicalSkill(name);
+  const dynamic = materializeDynamicSkill({ campaignId, characterId, name: definition.name || name, normalizedKey: definition.key, domain: definition.domain, attribute: DISPLAY_TO_CORE[normalizeSemanticText(attribute)] || definition.primary, sourceAction, createdDynamically, trained });
+  return synchronizeSkillAliases(dynamic);
 }
 
 function classTemplate(className: string) {
@@ -400,18 +430,17 @@ export function createInitialState(input: NewCampaignInput): GameState {
   const template = classTemplate(input.className);
   const opening = defaultOpening(input);
   const attributes = startingAttributes(input.className);
+  const characterId = clean(input.characterName, 60);
   const skills: Record<string, Skill> = {
-    Combate: makeSkill('Combate', 'Força', template.primary === 'Combate'),
-    Furtividade: makeSkill('Furtividade', 'Destreza', template.primary === 'Furtividade'),
-    Acrobacia: makeSkill('Acrobacia', 'Destreza'),
-    Sobrevivência: makeSkill('Sobrevivência', 'Sabedoria', template.primary === 'Sobrevivência'),
-    Percepção: makeSkill('Percepção', 'Sabedoria'),
-    Investigação: makeSkill('Investigação', 'Inteligência'),
-    Diplomacia: makeSkill('Diplomacia', 'Carisma'),
-    Intimidação: makeSkill('Intimidação', 'Carisma'),
-    Arcana: makeSkill('Arcana', 'Inteligência', template.primary === 'Arcana'),
-    Atletismo: makeSkill('Atletismo', 'Força'),
-    Pesca: makeSkill('Pesca', 'Sabedoria'),
+    Luta: makeSkill('Luta', 'Força', template.primary === 'Combate', campaignId, characterId),
+    Furtividade: makeSkill('Furtividade', 'Destreza', template.primary === 'Furtividade', campaignId, characterId),
+    Sobrevivência: makeSkill('Sobrevivência', 'Sabedoria', template.primary === 'Sobrevivência', campaignId, characterId),
+    Percepção: makeSkill('Percepção', 'Sabedoria', false, campaignId, characterId),
+    Investigação: makeSkill('Investigação', 'Inteligência', false, campaignId, characterId),
+    Persuasão: makeSkill('Persuasão', 'Carisma', false, campaignId, characterId),
+    Intimidação: makeSkill('Intimidação', 'Carisma', false, campaignId, characterId),
+    Arcana: makeSkill('Arcana', 'Inteligência', template.primary === 'Arcana', campaignId, characterId),
+    Atletismo: makeSkill('Atletismo', 'Força', false, campaignId, characterId),
   };
   const originLocation = locationRecord({ campaignId }, { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Ponto de Origem', region: clean(`Região de ${input.campaignName}`, 80), kind: 'wild', description: clean(input.openingPrompt, 500), discovered: true, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) });
   originLocation.current = true;
@@ -421,7 +450,7 @@ export function createInitialState(input: NewCampaignInput): GameState {
     normalizeItem({ name: 'Tocha', description: 'Ilumina locais escuros e permite explorar sem luz.', kind: 'ferramenta', category: 'tool', quantity: 1, value: 3, effects: { narrative: ['Afasta a escuridão imediata.'], mechanical: [{ type: 'unlock_action', target: 'explorar locais escuros', value: 1 }] } }, ownerId, `Equipamento inicial de ${input.className}.`),
   ];
   const state: GameState = {
-    schemaVersion: 7,
+    schemaVersion: 8,
     campaignId,
     visualCycle: createVisualCycle(campaignId),
     campaign: {
@@ -435,7 +464,8 @@ export function createInitialState(input: NewCampaignInput): GameState {
       memory: createMemoryState(input.openingPrompt, opening.premise, createdAt),
     },
     character: {
-      name: clean(input.characterName, 60), className: clean(input.className, 80), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
+      name: clean(input.characterName, 60), className: clean(input.className, 80), personality: clean(input.personality || 'Personalidade revelada pelas escolhas.', 180), appearanceDescription: clean(input.appearanceDescription || `Viajante ${input.className.toLowerCase()} de silhueta marcante.`, 220),
+      sprite: createSpriteIdentity({ id: campaignId, name: input.characterName, className: input.className, personality: input.personality, appearance: input.appearanceDescription, story: input.openingPrompt }), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
       level: 1, xp: 0, xpToNext: xpThreshold(2), attributePoints: 0, attributes,
       hp: template.hp + attributeModifier(attributes.Constituição), maxHp: template.hp + attributeModifier(attributes.Constituição), mana: template.mana, maxMana: template.mana, energy: 10, maxEnergy: 10,
       gold: 12, skills, inventory: initialItems, unlockedActions: [], professions: [opening.profession],
@@ -450,7 +480,7 @@ export function createInitialState(input: NewCampaignInput): GameState {
       itemRegistry: Object.fromEntries(initialItems.map(item => [item.id, structuredClone(item)])),
       unlocks: { locations: [], dialogues: [], events: [] },
       economy: { regionMultiplier: 1, shops: {} },
-      reputation: { individuals: {}, cities: { [originLocation.id]: 0 }, factions: {}, regions: { [originLocation.region]: 0 }, kingdoms: {}, moral: 0 }, timeline: [], processedTurnIds: [],
+      reputation: { individuals: {}, cities: { [originLocation.id]: 0 }, factions: {}, regions: { [originLocation.region]: 0 }, kingdoms: {}, moral: 0 }, timeline: [], processedTurnIds: [], skillAudits: [], skillMigrationBackup: [],
     },
     session: { turn: 0, narrative: opening.narrative, recentActions: [], pendingRoll: null, lastRoll: null, currentTurnId: '', events: [], combat: null },
     save: { createdAt, updatedAt: createdAt, revision: 1 },
@@ -463,29 +493,58 @@ export function currentLocation(state: GameState) {
 }
 
 export function inferSkill(action: string): { skill: string; attribute: AttributeKey } {
-  const value = action.toLowerCase();
-  if (/furt|roub|escond|silenc|arrom/.test(value)) return { skill: 'Furtividade', attribute: 'Destreza' };
-  if (/escal|salt|pul|equil[ií]br|acrob|abismo/.test(value)) return { skill: 'Acrobacia', attribute: 'Destreza' };
-  if (/atac|lutar|golpear|espada|dispar|combate/.test(value)) return { skill: 'Combate', attribute: 'Força' };
-  if (/correr|nadar|forçar|levantar|quebrar/.test(value)) return { skill: 'Atletismo', attribute: 'Força' };
-  if (/convenc|negoci|persuad|acalmar|dialog/.test(value)) return { skill: 'Diplomacia', attribute: 'Carisma' };
-  if (/ameaç|intimid|coagir/.test(value)) return { skill: 'Intimidação', attribute: 'Carisma' };
-  if (/investig|vasculh|procur|pista|examinar/.test(value)) return { skill: 'Investigação', attribute: 'Inteligência' };
-  if (/magia|runa|feitiço|arcano|ritual/.test(value)) return { skill: 'Arcana', attribute: 'Inteligência' };
-  if (/perceb|ouvir|observar|vigiar|notar/.test(value)) return { skill: 'Percepção', attribute: 'Sabedoria' };
-  if (/pesc|anzol|peixe/.test(value)) return { skill: 'Pesca', attribute: 'Sabedoria' };
-  return { skill: 'Sobrevivência', attribute: 'Sabedoria' };
+  const interpretation = resolveActionSemantics(action);
+  return { skill: interpretation.proposedSkill || 'Sobrevivência', attribute: CORE_TO_DISPLAY[interpretation.proposedAttribute] };
 }
 
-function detectRisk(action: string) {
-  return /atac|lut|roub|furt|arrom|escal|salt|pul|abismo|precip[ií]cio|correr de|fug|ameaç|engan|pesc|desarm|ritual|atravess|invad|persegu|perigo|sem ser visto/.test(action.toLowerCase());
+export function interpretPlayerAction(action: string, state?: GameState) {
+  return resolveActionSemantics(action, {
+    previousNarrative: state?.session.narrative,
+    nearbyNpcNames: state ? Object.values(state.world.npcs).filter(npc => npc.locationId === state.world.currentLocationId && npc.status === 'active').map(npc => npc.name) : [],
+    knownUnlockedActions: state?.character.unlockedActions,
+  });
 }
 
-function difficultyFor(action: string) {
-  const value = action.toLowerCase();
-  if (/impossível|lendário|mortal|sem ser visto/.test(value)) return 18;
-  if (/difícil|guardado|perigoso|tempestade/.test(value)) return 15;
-  return 12;
+function selectActionTest(state: GameState, action: string, interpretation = interpretPlayerAction(action, state), llmProposal?: Partial<ActionInterpretation>) {
+  const nearby = Object.values(state.world.npcs).filter(npc => npc.locationId === state.world.currentLocationId && npc.status === 'active');
+  const target = nearby.find(npc => normalizeSemanticText(action).includes(normalizeSemanticText(npc.name))) || (interpretation.opposed ? nearby[0] : undefined);
+  const targetDefense = target ? clamp(10 + Math.floor(Math.max(0, target.relationship) / 20), 8, 18) : undefined;
+  const contextualDifficulty = /impossível|quase impossível/i.test(action) ? 30 : /extraordinário/i.test(action) ? 26 : /extremo|mortal/i.test(action) ? 22 : undefined;
+  const selection = validateTestSelection({
+    campaignId: state.campaignId,
+    characterId: state.character.name,
+    turnId: state.session.currentTurnId || `turn-${state.session.turn}`,
+    interpretation,
+    existingSkills: Object.values(state.character.skills),
+    llmProposal,
+    contextualDifficulty,
+    targetLabel: target?.name,
+    targetDefense,
+  });
+  const conditionPenalty = state.character.conditions.reduce((sum, condition) => sum + Math.min(0, condition.modifier), 0);
+  if (conditionPenalty) selection.contextualModifiers.push({ id: 'active-conditions', label: 'Condições ativas', value: conditionPenalty, source: 'condition' });
+  return selection;
+}
+
+function ensureSelectionSkill(state: GameState, selection: ReturnType<typeof selectActionTest>) {
+  let skill = selection.existingSkillId ? Object.values(state.character.skills).find(candidate => candidate.id === selection.existingSkillId) : undefined;
+  if (!skill && selection.createSkill) {
+    skill = synchronizeSkillAliases(materializeDynamicSkill({ campaignId: state.campaignId, characterId: state.character.name, name: selection.skillName, normalizedKey: selection.normalizedSkillKey, domain: selection.interpretation.domain, attribute: selection.attribute, sourceAction: selection.interpretation.rawAction, createdDynamically: true, trained: true }));
+    state.character.skills[skill.name] = skill;
+    selection.audit.engineSelectedSkillId = skill.id;
+    selection.audit.engineSelectedSkillName = skill.name;
+  }
+  return skill;
+}
+
+function pendingFromSelection(selection: ReturnType<typeof selectActionTest>, action: string, turn: number, skill?: Skill): PendingRoll {
+  return {
+    id: uid(), action, skill: skill?.name || selection.skillName, skillId: skill?.id, attribute: CORE_TO_DISPLAY[selection.attribute], coreAttribute: selection.attribute,
+    difficulty: selection.difficulty || 12, reason: selection.interpretation.reasoning, createdAtTurn: turn,
+    domain: selection.interpretation.domain, intent: selection.interpretation.intent, method: selection.interpretation.actionMethod, opposed: selection.opposed, opposedBy: selection.opposedBy,
+    riskLevel: selection.interpretation.riskLevel, advantage: selection.advantage, disadvantage: selection.disadvantage, contextualModifiers: selection.contextualModifiers, auditId: selection.audit.id,
+    consentRequired: selection.interpretation.consentRequired,
+  };
 }
 
 function inferLocation(action: string, state: GameState): { location: Location; isNew: boolean } | null {
@@ -511,14 +570,19 @@ function inferLocation(action: string, state: GameState): { location: Location; 
   return { location, isNew: true };
 }
 
-function addSkillPractice(state: GameState, skillName: string, amount: number, events: GameEvent[]): GameState {
-  const existing = state.character.skills[skillName] || makeSkill(skillName, inferSkill(skillName).attribute);
-  let skill = { ...existing, xp: existing.xp + amount };
-  if (skill.xp >= skillThreshold(skill.level) && skill.level < 6) {
-    skill = { ...skill, xp: skill.xp - skillThreshold(skill.level), level: skill.level + 1, rank: rankFor(skill.level + 1) };
-    events.push(makeEvent(state, 'skill', `${skill.name} avançou para ${skill.rank}.`, 'engine', 70));
-  }
-  return { ...state, character: { ...state.character, skills: { ...state.character.skills, [skillName]: skill } } };
+function progressSkillAfterCheck(state: GameState, pending: PendingRoll, outcome: CheckOutcome, events: GameEvent[]): GameState {
+  const existing = Object.values(state.character.skills).find(skill => skill.id === pending.skillId || normalizeSemanticText(skill.name) === normalizeSemanticText(pending.skill));
+  if (!existing) return state;
+  const recent = state.world.skillAudits.slice(-8);
+  const exactAction = normalizeSemanticText(pending.action);
+  const repeatedExactAction = Math.max(0, recent.filter(audit => normalizeSemanticText(audit.rawPlayerAction) === exactAction).length - 1);
+  const recentSameSkillUses = Math.max(0, recent.filter(audit => audit.engineSelectedSkillId === existing.id || normalizeSemanticText(audit.engineSelectedSkillName || '') === normalizeSemanticText(existing.name)).length - 1);
+  const xp = meaningfulSkillXp({ difficulty: pending.difficulty, outcome, recentSameSkillUses, repeatedExactAction });
+  const beforeLevel = existing.level;
+  const progressed = synchronizeSkillAliases(progressDynamicSkill(existing, xp, outcome));
+  if (xp > 0) events.push(makeEvent(state, 'skill', `+${xp} XP em ${progressed.name} por uso significativo.`, 'engine', 62));
+  if (progressed.level > beforeLevel) events.push(makeEvent(state, 'skill', `${progressed.name} avançou para ${progressed.rank}.`, 'engine', 75));
+  return { ...state, character: { ...state.character, skills: { ...state.character.skills, [existing.name]: progressed } } };
 }
 
 export function grantMilestoneXp(state: GameState, amount: number, reason: string, events: GameEvent[]): GameState {
@@ -589,6 +653,7 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
       status: previous?.status || 'active',
       memoryProfile: previous?.memoryProfile || defaultNpcMemory(candidate.personality),
       visualAppearance: { ...(previous?.visualAppearance || defaultAppearance(candidate.profession)), ...candidate.visualAppearance },
+      sprite: previous?.sprite || createSpriteIdentity({ id, name, className: candidate.profession || candidate.role || 'Pessoa do mundo', personality: candidate.personality, appearance: [candidate.visualAppearance?.clothing, candidate.visualAppearance?.hair].filter(Boolean).join(', '), story: candidate.goal }),
     };
     targetLocation.presentNpcIds = Array.from(new Set([...targetLocation.presentNpcIds, id]));
     targetLocation.residentNpcIds = Array.from(new Set([...targetLocation.residentNpcIds, id]));
@@ -726,11 +791,15 @@ export function beginAction(inputState: GameState, rawAction: string, requestedT
     if (locationChange.isNew) state = grantMilestoneXp(state, 8, 'descoberta de um novo local', events);
   }
   state = applySocialConsequences(state, action, events);
-  const requiresDice = detectRisk(action);
+  const interpretation = interpretPlayerAction(action, state);
+  const selection = selectActionTest(state, action, interpretation);
+  state.world.skillAudits = [...state.world.skillAudits, selection.audit].slice(-200);
+  const skill = ensureSelectionSkill(state, selection);
+  const requiresDice = selection.requiresRoll;
   if (requiresDice) {
-    const inferred = inferSkill(action);
-    state.session.pendingRoll = { id: uid(), action, skill: inferred.skill, attribute: inferred.attribute, difficulty: difficultyFor(action), reason: `Há risco e consequência na tentativa de ${action.toLowerCase()}.`, createdAtTurn: state.session.turn };
-    events.push(makeEvent(state, 'roll', `Teste necessário: ${inferred.skill} (${inferred.attribute}) contra CD ${state.session.pendingRoll.difficulty}.`, 'engine', 85, false));
+    state.session.pendingRoll = pendingFromSelection(selection, action, state.session.turn, skill);
+    events.push(makeEvent(state, 'roll', `Teste necessário: ${state.session.pendingRoll.attribute} + ${state.session.pendingRoll.skill} contra CD ${state.session.pendingRoll.difficulty}. ${state.session.pendingRoll.reason}`, 'engine', 85, false));
+    if (selection.audit.newSkillCreated && skill) events.push(makeEvent(state, 'skill', `Nova perícia descoberta: ${skill.name} (${skill.rank}).`, 'engine', 68));
   }
   state = updateSave(withEvents(state, events));
   return {
@@ -739,7 +808,7 @@ export function beginAction(inputState: GameState, rawAction: string, requestedT
     roll: state.session.pendingRoll,
     events,
     fallbackNarrative: requiresDice
-      ? `Sua ação encontra resistência real. O resultado depende de um teste de ${state.session.pendingRoll!.skill} contra CD ${state.session.pendingRoll!.difficulty}.`
+      ? `Sua ação encontra resistência real. O resultado depende de ${state.session.pendingRoll!.attribute} + ${state.session.pendingRoll!.skill} contra CD ${state.session.pendingRoll!.difficulty}.`
       : `O mundo reage à sua decisão e a situação avança em ${currentLocation(state).name}. O que você faz?`,
   };
 }
@@ -769,20 +838,48 @@ export function resolvePendingRoll(inputState: GameState, forcedDie?: number): {
   if (!pending) throw new Error('Não há rolagem pendente.');
   let state = structuredClone(inputState);
   state.visualCycle = advanceVisualCycle(state.visualCycle);
-  const skill = state.character.skills[pending.skill] || makeSkill(pending.skill, pending.attribute);
-  const die = clamp(forcedDie || Math.floor(Math.random() * 20) + 1, 1, 20);
-  const attributeBonus = attributeModifier(state.character.attributes[pending.attribute]) + equipmentEffectTotal(state, 'attribute_bonus', pending.attribute);
-  const skillBonus = (skill.level - 1) + (skill.trained ? 2 : 0) + equipmentEffectTotal(state, 'skill_bonus', pending.skill);
-  const total = die + attributeBonus + skillBonus;
-  const result: RollResult = { ...pending, die, attributeBonus, skillBonus, total, success: die === 20 || (die !== 1 && total >= pending.difficulty), critical: die === 20 ? 'success' : die === 1 ? 'failure' : null };
-  const events: GameEvent[] = [makeEvent(state, 'roll', `${pending.skill}: d20 (${die}) + atributo ${attributeBonus >= 0 ? '+' : ''}${attributeBonus} + perícia ${skillBonus} = ${total} contra CD ${pending.difficulty}. ${result.success ? 'SUCESSO' : 'FALHA'}.`, 'engine', 100)];
+  const skill = Object.values(state.character.skills).find(candidate => candidate.id === pending.skillId || normalizeSemanticText(candidate.name) === normalizeSemanticText(pending.skill));
+  const equipmentAttribute = equipmentEffectTotal(state, 'attribute_bonus', pending.attribute);
+  const equipmentSkill = equipmentEffectTotal(state, 'skill_bonus', pending.skill);
+  const contextualModifiers = [...(pending.contextualModifiers || [])];
+  if (equipmentAttribute) contextualModifiers.push({ id: 'equipment-attribute', label: `Equipamento em ${pending.attribute}`, value: equipmentAttribute, source: 'equipment' });
+  if (equipmentSkill) contextualModifiers.push({ id: 'equipment-skill', label: `Equipamento em ${pending.skill}`, value: equipmentSkill, source: 'equipment' });
+  const check = resolveSkillCheck({
+    id: pending.id,
+    turnId: state.session.currentTurnId,
+    characterId: state.character.name,
+    attributeValue: state.character.attributes[pending.attribute],
+    skill,
+    difficulty: pending.difficulty,
+    forcedDie,
+    advantage: pending.advantage,
+    disadvantage: pending.disadvantage,
+    contextualModifiers,
+    opposedBy: pending.opposedBy,
+  });
+  const die = check.rollResult;
+  const total = check.totalResult;
+  const result: RollResult = {
+    ...pending, die, attributeBonus: check.attributeBonus, skillBonus: check.skillBonus, contextualBonus: check.contextualBonus, total,
+    success: check.outcome === 'success' || check.outcome === 'critical_success',
+    critical: check.outcome === 'critical_success' ? 'success' : check.outcome === 'critical_failure' ? 'failure' : null,
+    outcome: check.outcome,
+  };
+  const outcomeLabel: Record<CheckOutcome, string> = { critical_failure: 'FALHA CRÍTICA', failure: 'FALHA', partial_success: 'SUCESSO PARCIAL', success: 'SUCESSO', critical_success: 'SUCESSO CRÍTICO' };
+  const events: GameEvent[] = [makeEvent(state, 'roll', `${pending.attribute} + ${pending.skill}: d20 (${die}) + atributo ${check.attributeBonus >= 0 ? '+' : ''}${check.attributeBonus} + perícia ${check.skillBonus} + contexto ${check.contextualBonus} = ${total} contra CD ${pending.difficulty}. ${outcomeLabel[result.outcome]}.`, 'engine', 100)];
   state.session.pendingRoll = null;
   state.session.lastRoll = result;
-  state = addSkillPractice(state, pending.skill, result.success ? 3 : 1, events);
+  state = progressSkillAfterCheck(state, pending, result.outcome, events);
   state = resolveCombat(state, result, events);
+  const location = currentLocation(state);
   state.campaign.memory = appendSessionMemory(state.campaign.memory, state.session.turn, `${pending.skill} ${result.success ? 'teve sucesso' : 'falhou'} (${total}/${pending.difficulty}).`, result.critical ? 'major' : 'normal');
   state = updateSave(withEvents(state, events));
-  return { state, result, events, fallbackNarrative: result.success ? `O teste de ${pending.skill} funciona e abre uma oportunidade concreta. O que você faz?` : `O teste de ${pending.skill} falha e produz uma consequência, mas a história continua. O que você faz?` };
+  return {
+    state,
+    result,
+    events,
+    fallbackNarrative: `Resultado mecânico registrado: ${pending.skill} ${result.success ? 'teve sucesso' : 'falhou'} (${total}/${pending.difficulty}) em ${location.name}. A consequência ficcional deve ser narrada pela IA.`,
+  };
 }
 
 export function acceptNarrative(state: GameState, narrative: string, memorySummary?: string, memoryUpdate: string[] = [], worldDelta?: NarrativeWorldDelta): GameState {
@@ -798,13 +895,52 @@ export function setActiveIllustration(inputState: GameState, assetId: string, ge
   return updateSave({ ...inputState, visualCycle });
 }
 
-export function acceptSuggestedRoll(state: GameState, action: string, suggestion?: { skill?: string | null; attribute?: string | null; difficulty?: number | null; reason?: string | null }): GameState {
-  if (state.session.pendingRoll || !suggestion?.skill) return state;
-  const inferred = inferSkill(action);
-  const attribute = ATTRIBUTE_KEYS.includes(suggestion.attribute as AttributeKey) ? suggestion.attribute as AttributeKey : inferred.attribute;
-  const pending: PendingRoll = { id: uid(), action, skill: clean(suggestion.skill, 40), attribute, difficulty: clamp(Number(suggestion.difficulty) || 12, 8, 20), reason: clean(suggestion.reason || 'A situação envolve risco e consequência.', 180), createdAtTurn: state.session.turn };
-  const event = makeEvent(state, 'roll', `Teste necessário: ${pending.skill} (${pending.attribute}) contra CD ${pending.difficulty}.`, 'engine', 85, false);
-  return updateSave(withEvents({ ...state, session: { ...state.session, pendingRoll: pending } }, [event]));
+export function acceptSuggestedRoll(inputState: GameState, action: string, suggestion?: { skill?: string | null; attribute?: string | null; difficulty?: number | null; reason?: string | null; interpretation?: Partial<ActionInterpretation> | null }): GameState {
+  if (inputState.session.pendingRoll || !suggestion?.skill) return inputState;
+  const state = structuredClone(inputState);
+  const deterministic = interpretPlayerAction(action, state);
+  const proposedCore = suggestion.interpretation?.proposedAttribute
+    || DISPLAY_TO_CORE[normalizeSemanticText(suggestion.attribute || '')]
+    || deterministic.proposedAttribute;
+  const llmProposal: Partial<ActionInterpretation> = {
+    ...suggestion.interpretation,
+    proposedSkill: clean(suggestion.interpretation?.proposedSkill || suggestion.skill, 60),
+    proposedAttribute: proposedCore,
+    requiresRoll: true,
+    reasoning: clean(suggestion.interpretation?.reasoning || suggestion.reason || '', 240),
+  };
+  let interpretation = deterministic;
+  const unresolvedByRules = deterministic.domain === 'general' && /não identificou risco/i.test(deterministic.reasoning);
+  if (unresolvedByRules && llmProposal.domain && llmProposal.domain !== 'general' && llmProposal.reasoning) {
+    interpretation = {
+      ...deterministic,
+      intent: clean(llmProposal.intent || 'intenção interpretada semanticamente', 160),
+      domain: llmProposal.domain,
+      proposedSkill: llmProposal.proposedSkill || deterministic.proposedSkill,
+      proposedAttribute: proposedCore,
+      actionMethod: clean(llmProposal.actionMethod || 'método declarado pelo jogador', 120),
+      requiresRoll: true,
+      opposed: Boolean(llmProposal.opposed),
+      riskLevel: llmProposal.riskLevel && llmProposal.riskLevel !== 'none' ? llmProposal.riskLevel : 'medium',
+      reasoning: clean(llmProposal.reasoning, 240),
+      possibleExistingSkillKeys: llmProposal.possibleExistingSkillKeys || [],
+      trainable: true,
+      trivial: false,
+      consentRequired: llmProposal.consentRequired,
+    };
+  }
+  const selection = selectActionTest(state, action, interpretation, llmProposal);
+  if (!selection.requiresRoll) {
+    state.world.skillAudits = [...state.world.skillAudits, selection.audit].slice(-200);
+    return updateSave(state);
+  }
+  selection.audit.difficulty = selection.difficulty;
+  state.world.skillAudits = [...state.world.skillAudits, selection.audit].slice(-200);
+  const skill = ensureSelectionSkill(state, selection);
+  const pending = pendingFromSelection(selection, action, state.session.turn, skill);
+  const events = [makeEvent(state, 'roll', `Teste necessário: ${pending.attribute} + ${pending.skill} contra CD ${pending.difficulty}. ${pending.reason}`, 'engine', 85, false)];
+  if (selection.audit.newSkillCreated && skill) events.push(makeEvent(state, 'skill', `Nova perícia descoberta: ${skill.name} (${skill.rank}).`, 'engine', 68));
+  return updateSave(withEvents({ ...state, session: { ...state.session, pendingRoll: pending } }, events));
 }
 
 export function spendAttributePoint(inputState: GameState, attribute: AttributeKey): { state: GameState; events: GameEvent[] } {
@@ -902,7 +1038,7 @@ export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload):
     const id = `npc-${hash(name.toLowerCase()).toString(36)}`;
     const profession = clean(candidateNpc.profession || 'Ocupação desconhecida', 80);
     const personality = clean(candidateNpc.personality || '', 140);
-    npcs[id] = { id, campaignId: state.campaignId, name, role: clean(candidateNpc.role || 'Pessoa do mundo', 80), personality, goal: clean(candidateNpc.goal || '', 180), goals: [clean(candidateNpc.goal || '', 180)].filter(Boolean), profession, locationId: location.id, relationship: 0, relationships: [], reputationWithPlayer: 0, inventoryIds: [], createdFromEventId: 'world-genesis', knowledge: [], memories: [], status: 'active', memoryProfile: defaultNpcMemory(personality), visualAppearance: { ...defaultAppearance(profession), ...candidateNpc.visualAppearance } };
+    npcs[id] = { id, campaignId: state.campaignId, name, role: clean(candidateNpc.role || 'Pessoa do mundo', 80), personality, goal: clean(candidateNpc.goal || '', 180), goals: [clean(candidateNpc.goal || '', 180)].filter(Boolean), profession, locationId: location.id, relationship: 0, relationships: [], reputationWithPlayer: 0, inventoryIds: [], createdFromEventId: 'world-genesis', knowledge: [], memories: [], status: 'active', memoryProfile: defaultNpcMemory(personality), visualAppearance: { ...defaultAppearance(profession), ...candidateNpc.visualAppearance }, sprite: createSpriteIdentity({ id, name, className: profession, personality, appearance: candidateNpc.visualAppearance?.clothing, story: candidateNpc.goal }) };
   }
   location.residentNpcIds = Object.keys(npcs);
   location.presentNpcIds = Object.keys(npcs);
@@ -952,6 +1088,12 @@ function buildAiContextUncached(state: GameState) {
     campaign: { origin: state.campaign.originPrompt, premise: state.campaign.premise, conflict: state.campaign.conflict, opportunities: state.campaign.opportunities.slice(-6) },
     character: { name: state.character.name, className: state.character.className, profession: state.character.profession, level: state.character.level, hp: state.character.hp, maxHp: state.character.maxHp, mana: state.character.mana, gold: state.character.gold, titles: state.character.titles.slice(-5), conditions: state.character.conditions, unlockedActions: state.character.unlockedActions.slice(-8), inventory: state.character.inventory.filter(item => item.state !== 'stored').slice(0, 12).map(item => ({ name: item.name, category: item.category, rarity: item.rarity, quantity: item.quantity, equipped: item.equipped, durability: item.durability, effects: item.effects.mechanical })) },
     world: { day: state.world.day, hour: state.world.hour, weather: state.world.weather, location: { name: location.name, region: location.region, kind: location.kind, description: location.description }, culture: { name: state.world.culture.name, notes: state.world.culture.notes }, nearbyNpcs, unavailableNpcs, recentChanges: state.world.changes.slice(-6), unlocks: state.world.unlocks },
+    scene: {
+      previousNarrative: state.session.narrative,
+      recentActions: state.session.recentActions.slice(-4),
+      lastRoll: state.session.lastRoll,
+      recentConsequences: state.world.timeline.slice(-6).map(event => ({ type: event.eventType || event.type, text: event.text, turn: event.turn })),
+    },
     memory: buildMemoryContext(state),
     pendingRoll: state.session.pendingRoll,
   };
@@ -977,9 +1119,9 @@ export function migrateState(value: unknown): GameState | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<GameState> & Record<string, unknown>;
   const version = Number((candidate as Record<string, unknown>).schemaVersion);
-  if ([2, 3, 4, 5, 6, 7].includes(version) && candidate.character && candidate.world && candidate.session) {
+  if ([2, 3, 4, 5, 6, 7, 8].includes(version) && candidate.character && candidate.world && candidate.session) {
     const current = candidate as any;
-    current.schemaVersion = 7;
+    current.schemaVersion = 8;
     current.visualCycle = migrateVisualCycle(current.visualCycle, current.campaignId, 0);
     current.campaign.originPrompt ||= current.character.origin || current.campaign.premise || 'A campanha foi recuperada de uma versão anterior.';
     current.campaign.opportunities ||= [];
@@ -992,12 +1134,72 @@ export function migrateState(value: unknown): GameState | null {
     current.character.maxEnergy = Math.max(1, Number(current.character.maxEnergy ?? 10));
     current.character.spells ||= [];
     current.character.activeEffects ||= [];
+    current.character.personality ||= 'Personalidade revelada pelas escolhas.';
+    current.character.appearanceDescription ||= `Viajante ${current.character.className || 'aventureiro'} de silhueta marcante.`;
+    current.character.sprite = migrateSpriteIdentity(current.character.sprite, { id: current.campaignId, name: current.character.name, className: current.character.className, personality: current.character.personality, appearance: current.character.appearanceDescription, story: current.campaign.originPrompt });
     current.character.inventory = (current.character.inventory || []).map((item: Partial<Item> & Pick<Item, 'name' | 'description'>) => normalizeItem(item, current.character.name, item.origin || 'Migrado de uma campanha anterior.', current.session.turn || 0));
     current.world.itemRegistry ||= {};
     for (const item of current.character.inventory as Item[]) current.world.itemRegistry[item.id] = structuredClone(item);
     current.world.unlocks ||= { locations: [], dialogues: [], events: [] };
     current.world.processedTurnIds ||= [];
+    current.world.skillAudits ||= [];
+    current.world.skillMigrationBackup ||= [];
+    const shouldBackupSkills = version < 8 && current.world.skillMigrationBackup.length === 0;
+    const migratedSkills: Record<string, Skill> = {};
+    for (const [originalKey, raw] of Object.entries(current.character.skills || {}) as Array<[string, any]>) {
+      if (shouldBackupSkills) current.world.skillMigrationBackup.push({ originalKey, skill: structuredClone(raw) });
+      const definition = canonicalSkill(raw.name || originalKey, raw.domain);
+      const legacyAttribute = DISPLAY_TO_CORE[normalizeSemanticText(raw.attribute || '')] || raw.primaryAttribute || definition.primary;
+      const dynamic = materializeDynamicSkill({ campaignId: current.campaignId, characterId: current.character.name, name: definition.name || raw.name || originalKey, normalizedKey: definition.key, domain: raw.domain || definition.domain, attribute: legacyAttribute, createdDynamically: Boolean(raw.createdDynamically), trained: raw.trained ?? raw.proficiencyRank !== 'untrained' });
+      const normalized = synchronizeSkillAliases({
+        ...dynamic,
+        ...raw,
+        id: raw.id || dynamic.id,
+        campaignId: current.campaignId,
+        characterId: current.character.name,
+        name: definition.name || raw.name || originalKey,
+        normalizedKey: definition.key,
+        domain: raw.domain || definition.domain,
+        description: raw.description || definition.description,
+        primaryAttribute: legacyAttribute,
+        alternativeAttributes: raw.alternativeAttributes || definition.alternatives,
+        level: Math.max(1, Number(raw.level) || 1),
+        experience: Math.max(0, Number(raw.experience ?? raw.xp) || 0),
+        experienceToNextLevel: Math.max(1, Number(raw.experienceToNextLevel) || skillExperienceToNext(Math.max(1, Number(raw.level) || 1))),
+        proficiencyRank: raw.proficiencyRank || proficiencyForLevel(Math.max(1, Number(raw.level) || 1), Boolean(raw.trained)),
+        usageCount: Math.max(0, Number(raw.usageCount) || 0), successCount: Math.max(0, Number(raw.successCount) || 0), failureCount: Math.max(0, Number(raw.failureCount) || 0),
+        specializations: Array.isArray(raw.specializations) ? raw.specializations : [], legacyImported: raw.normalizedKey ? Boolean(raw.legacyImported) : true,
+        createdAt: raw.createdAt || current.save?.createdAt || now(), updatedAt: raw.updatedAt || current.save?.updatedAt || now(),
+      });
+      const previous = migratedSkills[normalized.name];
+      if (!previous || normalized.level > previous.level || normalized.experience > previous.experience) migratedSkills[normalized.name] = normalized;
+    }
+    current.character.skills = migratedSkills;
     current.session.currentTurnId ||= '';
+    if (current.session.pendingRoll && !current.session.pendingRoll.coreAttribute) {
+      const pending = current.session.pendingRoll;
+      const interpretation = interpretPlayerAction(pending.action, current as GameState);
+      const matched = Object.values(current.character.skills as Record<string, Skill>).find(skill => normalizeSemanticText(skill.name) === normalizeSemanticText(pending.skill));
+      Object.assign(pending, {
+        coreAttribute: DISPLAY_TO_CORE[normalizeSemanticText(pending.attribute)] || interpretation.proposedAttribute,
+        skillId: matched?.id,
+        domain: interpretation.domain,
+        intent: interpretation.intent,
+        method: interpretation.actionMethod,
+        opposed: interpretation.opposed,
+        riskLevel: interpretation.riskLevel === 'none' ? 'medium' : interpretation.riskLevel,
+        advantage: 0,
+        disadvantage: 0,
+        contextualModifiers: [],
+        auditId: `migration-${pending.id}`,
+        consentRequired: interpretation.consentRequired,
+      });
+    }
+    if (current.session.lastRoll && !current.session.lastRoll.outcome) {
+      const last = current.session.lastRoll;
+      last.outcome = last.critical === 'success' ? 'critical_success' : last.critical === 'failure' ? 'critical_failure' : last.success ? 'success' : 'failure';
+      last.contextualBonus ||= 0;
+    }
     for (const location of Object.values(current.world.locations || {}) as Location[]) {
       location.campaignId ||= current.campaignId; location.visualIdentity ||= defaultVisualIdentity(location.kind, location.description); location.visited ??= location.discovered;
       location.current = location.id === current.world.currentLocationId; location.status ||= 'active'; location.connectedLocationIds ||= []; location.residentNpcIds ||= []; location.presentNpcIds ||= [];
@@ -1005,6 +1207,7 @@ export function migrateState(value: unknown): GameState | null {
     }
     for (const npc of Object.values(current.world.npcs || {}) as NPC[]) {
       npc.campaignId ||= current.campaignId; npc.status ||= 'active'; npc.goals ||= [npc.goal].filter(Boolean); npc.relationships ||= []; npc.reputationWithPlayer ??= npc.relationship || 0; npc.inventoryIds ||= []; npc.createdFromEventId ||= 'migration'; npc.memoryProfile ||= defaultNpcMemory(npc.personality); npc.visualAppearance ||= defaultAppearance(npc.profession);
+      npc.sprite = migrateSpriteIdentity(npc.sprite, { id: npc.id, name: npc.name, className: npc.profession || npc.role, personality: npc.personality, appearance: [npc.visualAppearance.clothing, npc.visualAppearance.hair].filter(Boolean).join(', '), story: npc.goal });
     }
     for (const quest of current.campaign.quests || []) {
       quest.source ||= 'emergent'; quest.memory ||= { origin: 'Migrada de uma versão anterior.', motive: quest.description || quest.title, progress: [], consequences: [], personalGoal: quest.objectives?.[0]?.text || '' };

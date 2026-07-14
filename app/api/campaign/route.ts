@@ -12,6 +12,8 @@ export async function POST(request: Request) {
       characterName: body.characterName?.trim().slice(0, 60) || '',
       className: body.className?.trim().slice(0, 80) || '',
       openingPrompt: body.openingPrompt?.trim().slice(0, 700) || '',
+      personality: body.personality?.trim().slice(0, 180) || '',
+      appearanceDescription: body.appearanceDescription?.trim().slice(0, 220) || '',
     };
     if (!input.campaignName || !input.characterName || !input.className || !input.openingPrompt) return NextResponse.json({ error: 'Preencha campanha, personagem, classe e como a história começa.' }, { status: 400 });
     let state = createInitialState(input);

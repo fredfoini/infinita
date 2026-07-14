@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { GameState } from '@/lib/engine';
 import ParchmentWriting from '@/components/ParchmentWriting';
+import LayeredWorldScene from '@/components/LayeredWorldScene';
 import { createSceneVisualDescriptor } from '@/lib/visual/scene-descriptor';
 import { findBestVisualAsset } from '@/lib/visual/semantic-matcher';
 import {
@@ -17,6 +18,11 @@ type SceneVisualProps = {
   state: GameState;
   onIllustrationResolved?: (assetId: string, generated: boolean) => void;
 };
+
+const COMPOSED_LOCATION_TYPES = new Set([
+  'city', 'village', 'road', 'tavern', 'inn', 'forest', 'wild', 'river', 'harbor',
+  'mine', 'cave', 'ruin', 'castle', 'church', 'temple', 'shop', 'workshop', 'mountain',
+]);
 
 function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
   const cycle = state.visualCycle;
@@ -33,7 +39,8 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
     let cancelled = false;
     setAsset(null);
     setStatus('parchment');
-    if (cycle.currentPhase !== 'illustration') return () => { cancelled = true; };
+    const hasNativeComposition = COMPOSED_LOCATION_TYPES.has(descriptor.locationType.toLocaleLowerCase('pt-BR'));
+    if (cycle.currentPhase !== 'illustration' || hasNativeComposition) return () => { cancelled = true; };
 
     async function resolveIllustrationBlock() {
       // An illustration already attached to this block is immutable for all ten actions.
@@ -95,11 +102,9 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
   }, [state.campaignId, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId, descriptor, onIllustrationResolved]);
 
   return <div className="scene-visual" data-source={status} data-phase={cycle.currentPhase}>
-    <ParchmentWriting />
-    {/* Assets do banco podem ser data URLs; o otimizador do Next não materializa esse formato. */}
-    {/* eslint-disable-next-line @next/next/no-img-element */}
-    {asset && <img className="cycle-illustration" src={asset.fileUrl} alt={`Cena em ${descriptor.locationType}: ${descriptor.primaryEmotion}`} draggable={false} decoding="async" />}
-    {status === 'generating' && <span className="visual-loading">ILUSTRANDO A CRÔNICA...</span>}
+    <LayeredWorldScene state={state} illustrationUrl={asset?.fileUrl} />
+    {status === 'generating' && <div className="visual-loading-parchment"><ParchmentWriting label="Preparando a próxima lembrança visual" /></div>}
+    {status === 'generating' && <span className="visual-loading">COMPONDO A CENA...</span>}
   </div>;
 }
 

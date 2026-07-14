@@ -5,6 +5,8 @@ import dynamic from 'next/dynamic';
 import Logo from '@/components/Logo';
 import InventoryPanel from '@/components/InventoryPanel';
 import MenuSpriteStage from '@/components/MenuSpriteStage';
+import ParchmentWriting from '@/components/ParchmentWriting';
+import PixelActor from '@/components/PixelActor';
 import { createInitialState, currentLocation, migrateState, productPrice, setActiveIllustration, xpProgress, type AttributeKey, type GameState, type NewCampaignInput, type RollResult } from '@/lib/engine';
 import type { ItemAction } from '@/lib/items/item-engine';
 
@@ -25,6 +27,20 @@ const CLASS_OPTIONS = [
   { name: 'Ladino', icon: '✦', text: 'Age com precisão onde ninguém está olhando.' },
   { name: 'Místico', icon: '☽', text: 'Interpreta forças antigas e conhecimentos ocultos.' },
 ];
+
+function difficultyLabel(value: number) {
+  if (value <= 5) return 'muito fácil';
+  if (value <= 8) return 'fácil';
+  if (value <= 10) return 'comum';
+  if (value <= 12) return 'moderada';
+  if (value <= 15) return 'difícil';
+  if (value <= 18) return 'muito difícil';
+  if (value <= 22) return 'extrema';
+  if (value <= 26) return 'extraordinária';
+  return 'quase impossível';
+}
+
+const OUTCOME_LABEL = { critical_failure: 'FALHA CRÍTICA', failure: 'FALHA', partial_success: 'SUCESSO PARCIAL', success: 'SUCESSO', critical_success: 'SUCESSO CRÍTICO' } as const;
 
 function readCampaigns(): StoredCampaigns {
   try {
@@ -71,6 +87,8 @@ export default function Game() {
   const [characterName, setCharacterName] = useState('');
   const [campaignName, setCampaignName] = useState('');
   const [openingPrompt, setOpeningPrompt] = useState('');
+  const [personality, setPersonality] = useState('');
+  const [appearanceDescription, setAppearanceDescription] = useState('');
   const [selectedClass, setSelectedClass] = useState('Explorador');
   const [customClass, setCustomClass] = useState('');
   const [action, setAction] = useState('');
@@ -139,7 +157,7 @@ export default function Game() {
   async function createCampaign(event: FormEvent) {
     event.preventDefault();
     const className = customClass.trim() || selectedClass;
-    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className, openingPrompt: openingPrompt.trim() };
+    const input: NewCampaignInput = { characterName: characterName.trim(), campaignName: campaignName.trim(), className, openingPrompt: openingPrompt.trim(), personality: personality.trim(), appearanceDescription: appearanceDescription.trim() };
     if (!input.characterName || !input.campaignName || !input.className || !input.openingPrompt || busy) return;
     setBusy(true);
     setNotice('Criando um mundo para este personagem...');
@@ -171,7 +189,7 @@ export default function Game() {
       const reply = await api<TurnReply>('/api/turn', { kind, requestId, action: playerAction, state: current, ...extra });
       if (!reply.state) throw new Error('A Engine não retornou o estado do jogo.');
       update(reply.state);
-      setNotice(reply.warning ? 'A IA ficou indisponível neste turno; a Engine preservou o progresso.' : reply.mode === 'ai' ? 'Turno salvo.' : 'Turno resolvido pela Engine.');
+      setNotice(reply.warning ? 'Turno concluído pela Engine; o serviço narrativo está temporariamente indisponível.' : reply.mode === 'ai' ? 'Turno salvo.' : 'Turno resolvido pela Engine.');
     } catch (error) {
       setNotice(error instanceof Error ? error.message : 'Não foi possível concluir o turno. Tente novamente.');
     } finally {
@@ -206,7 +224,7 @@ export default function Game() {
     void sendTurn('itemAction', undefined, { itemId, itemOperation });
   }
 
-  if (!loaded) return <main className="loading-screen"><Logo variant="loading" priority/><span>CARREGANDO MUNDO...</span></main>;
+  if (!loaded) return <main className="loading-screen"><div className="loading-parchment"><ParchmentWriting label="Carregando a crônica" /></div><Logo variant="loading" priority/><span>PREPARANDO A CRÔNICA...</span><i className="loading-particle p1"/><i className="loading-particle p2"/><i className="loading-particle p3"/></main>;
 
   if (intro) return <IntroSequence campaign={intro} onComplete={() => setIntro(null)} />;
 
@@ -233,6 +251,8 @@ export default function Game() {
           <div className="menu-fields">
             <label>NOME DO PERSONAGEM<input value={characterName} onChange={event => setCharacterName(event.target.value)} maxLength={60} placeholder="Quem enfrentará o mundo?" /></label>
             <label>NOME DA CAMPANHA<input value={campaignName} onChange={event => setCampaignName(event.target.value)} maxLength={80} placeholder="O nome desta crônica" /></label>
+            <label>PERSONALIDADE<input value={personality} onChange={event => setPersonality(event.target.value)} maxLength={180} placeholder="Ex.: curioso, leal e impaciente" /></label>
+            <label>APARÊNCIA<input value={appearanceDescription} onChange={event => setAppearanceDescription(event.target.value)} maxLength={220} placeholder="Ex.: capa curta verde, cabelos escuros, cicatriz discreta" /></label>
           </div>
           <label className="opening-seed">COMO SUA HISTÓRIA COMEÇA?<textarea value={openingPrompt} onChange={event => setOpeningPrompt(event.target.value)} maxLength={700} required placeholder="Ex.: Sou um ferreiro falido. Acordei em um navio pirata. Sou um músico viajante em busca de trabalho..." /><small>Esta situação será a semente de todo o mundo. Não existe campanha principal predefinida.</small></label>
           <label>ARQUÉTIPOS SUGERIDOS</label>
@@ -251,6 +271,7 @@ export default function Game() {
 
   const pendingRoll = current.session.pendingRoll;
   const lastRoll = current.session.lastRoll;
+  const activeSkillAudit = pendingRoll ? current.world.skillAudits.find(audit => audit.id === pendingRoll.auditId) : current.world.skillAudits.at(-1);
   return <main className="game-screen">
     <div className="console-label">● INFINITA ADVANCE</div>
     <div className="shell">
@@ -266,15 +287,17 @@ export default function Game() {
           </div>
           <article className="narrative" aria-live="polite">
             {busy && <span className="thinking">◆</span>}{current.session.narrative}
-            {lastRoll && <div className={`roll-result ${lastRoll.success ? 'success' : 'failure'}`}>D20 {lastRoll.die} · TOTAL {lastRoll.total} · {lastRoll.success ? 'SUCESSO' : 'FALHA'}</div>}
+            {lastRoll && <div className={`roll-result ${['partial_success', 'success', 'critical_success'].includes(lastRoll.outcome) ? 'success' : 'failure'}`}>D20 {lastRoll.die} · TOTAL {lastRoll.total} · {OUTCOME_LABEL[lastRoll.outcome] || (lastRoll.success ? 'SUCESSO' : 'FALHA')}</div>}
             {current.session.turn < 2 && <div className="tutorial-tip">Escreva qualquer ação. Quando houver risco, você rolará um dado D20.</div>}
           </article>
         </section>
         <aside className={drawerOpen ? 'drawer-open' : ''}>
           <button type="button" className="drawer-close" onClick={() => setDrawerOpen(false)}>× FECHAR</button>
           <button className="switch" type="button" onClick={() => setMenu(true)}>≡ SALVAR E VOLTAR AO MENU</button>
-          <h2>{current.character.name.toUpperCase()}</h2>
-          <p className="class-label">{current.character.className} · {current.character.profession}</p>
+          <div className="character-card">
+            <PixelActor identity={current.character.sprite} animation="idle" compact label={`${current.character.name}, ${current.character.className}`} className="character-portrait" />
+            <div><h2>{current.character.name.toUpperCase()}</h2><p className="class-label">{current.character.className} · {current.character.profession}</p></div>
+          </div>
           <div className="stat"><span>VITALIDADE</span><b>{current.character.hp}/{current.character.maxHp}</b></div>
           <div className="bar"><i style={{ width: `${current.character.hp / current.character.maxHp * 100}%` }} /></div>
           <div className="stat"><span>MANA</span><b>{current.character.mana}/{current.character.maxMana}</b></div>
@@ -302,9 +325,9 @@ export default function Game() {
         {current.session.events.length ? current.session.events.slice(0, 5).map(event => <p key={event.id} className={`event ${event.type}`}>{event.text}</p>) : <p>Nenhuma consequência registrada.</p>}
       </section>
       <form className="action-form" onSubmit={submitAction}>
-        <label>{pendingRoll ? `TESTE DE ${pendingRoll.skill.toUpperCase()} · ${pendingRoll.reason}` : 'O QUE VOCÊ FAZ?'}</label>
+        <label>{pendingRoll ? `TESTE DE ${pendingRoll.attribute.toUpperCase()} + ${pendingRoll.skill.toUpperCase()}` : 'O QUE VOCÊ FAZ?'}</label>
         {pendingRoll
-          ? <button type="button" className="roll-only" onClick={() => void sendTurn('roll')} disabled={busy}><span>⚄</span>{busy ? 'ROLANDO...' : `ROLAR D20 · ${pendingRoll.attribute} · CD ${pendingRoll.difficulty}`}</button>
+          ? <div className="roll-request"><small>Motivo: {pendingRoll.reason}<br/>Dificuldade: {difficultyLabel(pendingRoll.difficulty)} · CD {pendingRoll.difficulty}{pendingRoll.opposedBy ? ` · oposição: ${pendingRoll.opposedBy.label}` : ''}</small>{process.env.NODE_ENV !== 'production' && activeSkillAudit && <details className="skill-audit"><summary>AUDITORIA DO TESTE</summary><code>Ação: {activeSkillAudit.rawPlayerAction}<br/>Intenção: {activeSkillAudit.interpretedIntent}<br/>Domínio: {activeSkillAudit.domain}<br/>Proposta LLM: {activeSkillAudit.llmProposedAttribute || '—'} + {activeSkillAudit.llmProposedSkill || '—'}<br/>Validação: {activeSkillAudit.engineSelectedAttribute} + {activeSkillAudit.engineSelectedSkillName}<br/>Correções: {activeSkillAudit.corrections.join(' | ') || 'nenhuma'}<br/>CD: {activeSkillAudit.difficulty}</code></details>}<button type="button" className="roll-only" onClick={() => void sendTurn('roll')} disabled={busy}><span>⚄</span>{busy ? 'ROLANDO...' : 'ROLAR D20'}</button></div>
           : <div className="input-row"><input ref={actionInputRef} value={action} onChange={event => setAction(event.target.value)} maxLength={500} placeholder="Escreva qualquer ação..." disabled={busy} autoFocus /><button disabled={busy || !action.trim()}>{busy ? '...' : 'ENVIAR'}</button></div>}
       </form>
       <footer><span>AUTOSAVE · REVISÃO {current.save.revision}</span><span>{notice || 'CAMPANHA ATIVA'}</span></footer>

@@ -14,14 +14,20 @@ const visualCycle = compileModule(path.join('lib', 'visual', 'visual-cycle.ts'))
 const itemEngine = compileModule(path.join('lib', 'items', 'item-engine.ts'));
 const eventBus = compileModule(path.join('lib', 'events', 'event-bus.ts'));
 const magicEngine = compileModule(path.join('lib', 'magic', 'magic-engine.ts'));
-const engine = compileModule(path.join('lib', 'engine.ts'), id => id === '@/lib/memory/memory-builder' ? memory : id === '@/lib/visual/visual-cycle' ? visualCycle : id === '@/lib/items/item-engine' ? itemEngine : id === '@/lib/events/event-bus' ? eventBus : id === '@/lib/magic/magic-engine' ? magicEngine : require(id));
+const skillTypes = compileModule(path.join('lib', 'skills', 'types.ts'));
+const semanticResolver = compileModule(path.join('lib', 'skills', 'skill-semantic-resolver.ts'), id => id === '@/lib/skills/types' ? skillTypes : require(id));
+const testValidator = compileModule(path.join('lib', 'skills', 'test-selection-validator.ts'), id => id === '@/lib/skills/types' ? skillTypes : id === '@/lib/skills/skill-semantic-resolver' ? semanticResolver : require(id));
+const skillCheckEngine = compileModule(path.join('lib', 'skills', 'skill-check-engine.ts'), id => id === '@/lib/skills/types' ? skillTypes : id === '@/lib/skills/test-selection-validator' ? testValidator : require(id));
+const spriteSystem = compileModule(path.join('lib', 'visual', 'sprite-system.ts'));
+const engine = compileModule(path.join('lib', 'engine.ts'), id => id === '@/lib/memory/memory-builder' ? memory : id === '@/lib/visual/visual-cycle' ? visualCycle : id === '@/lib/visual/sprite-system' ? spriteSystem : id === '@/lib/items/item-engine' ? itemEngine : id === '@/lib/events/event-bus' ? eventBus : id === '@/lib/magic/magic-engine' ? magicEngine : id === '@/lib/skills/types' ? skillTypes : id === '@/lib/skills/skill-semantic-resolver' ? semanticResolver : id === '@/lib/skills/test-selection-validator' ? testValidator : id === '@/lib/skills/skill-check-engine' ? skillCheckEngine : require(id));
 
 let assertions = 0;
 function check(condition, message) { assertions += 1; if (!condition) throw new Error(message); }
 
 const input = { campaignName: 'Teste', characterName: 'Lyra', className: 'Explorador', openingPrompt: 'Acordei sem memória dentro de um farol que flutua sobre o oceano.' };
 const initial = engine.createInitialState(input);
-check(initial.schemaVersion === 7, 'Estado deve usar schema v7 transacional.');
+check(initial.schemaVersion === 8, 'Estado deve usar schema v8 com perícias dinâmicas.');
+check(initial.character.sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png' && initial.character.appearanceDescription !== undefined, 'Identidade visual do personagem deve nascer persistida na campanha.');
 check(initial.character.mana <= initial.character.maxMana && initial.character.energy <= initial.character.maxEnergy, 'Recursos devem nascer dentro dos limites persistidos.');
 check(Array.isArray(initial.character.spells) && Array.isArray(initial.world.processedTurnIds), 'Magic Engine e idempotência devem existir no estado.');
 check(initial.visualCycle.validActionCount === 0 && initial.visualCycle.currentPhase === 'parchment', 'Nova campanha deve começar no pergaminho, na ação zero.');
@@ -42,9 +48,11 @@ check(conjugatedRisk.requiresDice && conjugatedRisk.roll.skill === 'Acrobacia', 
 
 const risky = engine.beginAction(trivial.state, 'Eu tento arrombar a porta sem ser visto.');
 check(risky.requiresDice && risky.state.session.pendingRoll, 'Ação arriscada deve criar uma rolagem pendente.');
-check(risky.roll.skill === 'Furtividade', 'A Engine deve explicar qual perícia será testada.');
+check(risky.roll.skill === 'Ladinagem', 'Arrombamento técnico deve usar Ladinagem, não Furtividade genérica.');
 const failure = engine.resolvePendingRoll(risky.state, 1);
 check(!failure.result.success && failure.state.session.pendingRoll === null, 'Falha deve resolver o dado sem travar o turno.');
+check(failure.state.world.changes.length === risky.state.world.changes.length, 'A Engine não deve inventar uma consequência narrativa tipada para o resultado do dado.');
+check(failure.state.session.lastRoll?.die === 1 && failure.state.world.timeline.some(event => event.type === 'roll'), 'A Engine deve persistir somente o resultado mecânico antes da consequência da IA.');
 const continuation = engine.beginAction(failure.state, 'Eu recuo e observo outra entrada.');
 check(continuation.state.session.turn === failure.state.session.turn + 1, 'A campanha deve continuar após uma falha.');
 
@@ -65,6 +73,7 @@ check(engine.currentLocation(genesis).name === 'Farol Errante', 'Gênese deve su
 check(genesis.world.culture.name === 'Navegantes do Céu' && genesis.campaign.opportunities.length === 2, 'Cultura e oportunidades iniciais devem persistir.');
 check(Object.values(genesis.world.npcs)[0].status === 'active', 'NPC emergente deve nascer substituível e ativo.');
 check(Object.values(genesis.world.npcs)[0].memoryProfile && engine.currentLocation(genesis).visualIdentity, 'NPC e local devem persistir continuidade narrativa e visual.');
+check(Object.values(genesis.world.npcs)[0].sprite?.sheetUrl === '/assets/hero-sprite-sheet-v1.png', 'NPC importante deve receber identidade visual persistente.');
 
 const evolved = engine.applyNarrativeWorldDelta(genesis, { quests: [{ title: 'Manter o farol no ar', description: 'Impedir a queda.', objective: 'Estabilizar o mecanismo', status: 'active' }], worldChanges: ['Uma das correntes de sustentação se rompeu.'] });
 check(evolved.campaign.quests[0].source === 'emergent', 'Objetivos devem ser marcados como emergentes.');
@@ -83,7 +92,7 @@ check(purchase.state.character.gold < marketState.character.gold, 'Economia emer
 check(purchase.state.character.inventory.some(item => item.name === 'Corda celeste'), 'Compra deve persistir no inventário.');
 
 const migrated = engine.migrateState({ campaignId: 'old', campaignName: 'Antiga', characterName: 'Nox', className: 'Ladino', level: 2, xp: 100, hp: 8, maxHp: 12, gold: 3, log: ['Cena antiga'] });
-check(migrated && migrated.schemaVersion === 7 && migrated.campaign.originPrompt, 'Save legado deve migrar para o paradigma emergente.');
+check(migrated && migrated.schemaVersion === 8 && migrated.campaign.originPrompt, 'Save legado deve migrar para o paradigma emergente.');
 
 let cycle = visualCycle.createVisualCycle('cycle-test');
 for (let action = 1; action <= 10; action += 1) cycle = visualCycle.advanceVisualCycle(cycle);
@@ -113,7 +122,7 @@ check(lostInitial.state.world.itemRegistry[initial.character.inventory[1].id].st
 
 const legacyV5 = structuredClone(initial); legacyV5.schemaVersion = 5; legacyV5.character.inventory = [{ id: 'legacy-item', name: 'Objeto antigo', kind: 'material', quantity: 1, value: 2, description: 'Veio de um save anterior.' }]; delete legacyV5.world.itemRegistry; delete legacyV5.world.unlocks; delete legacyV5.character.unlockedActions;
 const migratedV5 = engine.migrateState(legacyV5);
-check(migratedV5.schemaVersion === 7 && migratedV5.character.inventory[0].effects.mechanical.length, 'Save v5 deve ganhar o novo contrato sem perder o inventário antigo.');
+check(migratedV5.schemaVersion === 8 && migratedV5.character.inventory[0].effects.mechanical.length, 'Save v5 deve ganhar o novo contrato sem perder o inventário antigo.');
 
 const synchronized = engine.applyNarrativeWorldDelta(initial, {
   locations: [{ name: 'Oficina Suspensa', region: 'Arquipélago', kind: 'workshop', description: 'Uma oficina presa a balões.' }], currentLocationName: 'Oficina Suspensa',
@@ -153,6 +162,8 @@ check(hpCap.character.hp === hpCap.character.maxHp, 'Cura não pode ultrapassar 
 const attackState = structuredClone(risky.state); const attackMana = attackState.character.mana;
 const basicAttack = engine.resolvePendingRoll(attackState, 20);
 check(basicAttack.state.character.mana === attackMana, 'Ataque básico não deve consumir mana.');
+check(/consequência ficcional deve ser narrada pela IA/i.test(basicAttack.fallbackNarrative), 'Resultado mecânico deve exigir uma consequência ficcional da IA.');
+check(basicAttack.state.world.changes.length === attackState.world.changes.length, 'Sucesso mecânico não deve criar texto narrativo padrão na trilha do mundo.');
 
 const idempotentBase = engine.beginAction(initial, 'Eu examino o mecanismo.', 'turn-fixed-id');
 const committedIdempotent = engine.acceptNarrative(idempotentBase.state, 'O mecanismo revela uma engrenagem solta. O que você faz?');

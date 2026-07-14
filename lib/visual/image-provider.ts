@@ -54,7 +54,7 @@ export async function generateVisualAsset(input: SceneVisualDescriptor): Promise
   const createdAt = new Date().toISOString();
   const id = `${sceneVisualHash(safeDescriptor)}-${Date.now().toString(36)}`;
   const asset: VisualAsset = {
-    id, fileUrl, provider: config.provider, model: config.model, promptVersion: 'infinita-gba-v1', createdAt,
+    id, fileUrl, provider: config.provider, model: config.model, promptVersion: 'infinita-isometric-v2', createdAt,
     createdByCampaignId: descriptor.campaignId, genreTags: [descriptor.genre], primaryEmotion: descriptor.primaryEmotion,
     secondaryEmotions: descriptor.secondaryEmotions, locationTags: [descriptor.locationType], actionTags: [descriptor.actionType],
     environmentTags: descriptor.environmentTags, characterTags: descriptor.characterArchetypes, intensity: descriptor.intensity,

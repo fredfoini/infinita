@@ -1,6 +1,7 @@
 import { buildAiContext, type CampaignGenesisPayload, type GameState, type NarrativeWorldDelta, type NewCampaignInput, type RollResult } from '@/lib/engine';
 import { shouldConsolidateMemory, validateNarrativeConsistency } from '@/lib/memory/memory-builder';
 import { ProviderFactory } from '@/lib/providers/provider-factory';
+import type { ActionInterpretation } from '@/lib/skills/types';
 
 export type GameMasterReply = {
   narrative: string;
@@ -15,6 +16,7 @@ export type GameMasterReply = {
   memoryUpdate: string[];
   memorySummary: string;
   worldDelta: NarrativeWorldDelta;
+  actionInterpretation?: Partial<ActionInterpretation> | null;
 };
 
 export type CampaignGenesis = CampaignGenesisPayload;
@@ -32,10 +34,10 @@ async function requestJson<T>(system: string, user: string, maxTokens = 800): Pr
   return result?.data || null;
 }
 
-function fallbackReply(state: GameState, fallbackNarrative: string, action = ''): GameMasterReply {
+function fallbackReply(state: GameState, fallbackNarrative: string, action = '', resolvedRoll = false): GameMasterReply {
   const location = state.world.locations[state.world.currentLocationId];
   const subject = action.trim() || 'sua decisão';
-  const contextual = state.session.pendingRoll
+  const contextual = state.session.pendingRoll || resolvedRoll
     ? fallbackNarrative
     : `${state.character.name} executa: “${subject}”. Em ${location?.name || 'seu caminho'}, algo concreto muda: o ambiente e as pessoas passam a responder a essa escolha, abrindo uma nova situação em vez de repetir a anterior. O que você faz?`;
   return {
@@ -47,19 +49,37 @@ function fallbackReply(state: GameState, fallbackNarrative: string, action = '')
   };
 }
 
+function violatesConsentContract(narrative: string) {
+  return /sem (?:poder|conseguir) resistir|contra (?:a|o) vontade|[ée] obrigad[ao]|n[aã]o tem escolha|cede automaticamente|passa a amar/i.test(narrative);
+}
+
 export async function narrateTurn(state: GameState, action: string, fallbackNarrative: string, rollResult?: RollResult): Promise<{ reply: GameMasterReply; mode: 'ai' | 'fallback'; error?: string }> {
   const context = buildAiContext(state);
-  const contract = `Retorne exatamente estas chaves: {"narrative":string,"requiresDice":boolean,"diceType":"d20","difficulty":number|null,"skill":string|null,"attribute":string|null,"reason":string|null,"npcActions":string[],"worldSuggestions":string[],"memoryUpdate":string[],"memorySummary":string,"worldDelta":{"locations":[{"name":string,"region":string,"kind":string,"description":string,"visualIdentity":{"architecture":string,"palette":string[],"fixedObjects":string[]}}],"currentLocationName":string|null,"npcs":[{"name":string,"role":string,"personality":string,"goal":string,"profession":string,"locationName":string,"visualAppearance":{"clothing":string,"hair":string,"accessories":string[],"weapon":string,"apparentAge":string,"palette":string[]}}],"npcChanges":[{"name":string,"status":"active|dead|missing|departed","memory":string}],"opportunities":string[],"quests":[{"title":string,"description":string,"objective":string,"status":"active|completed|failed|abandoned"}],"worldChanges":string[],"items":[{"name":string,"description":string,"category":"consumable|tool|weapon|armor|accessory|material|quest|document|key|relic|narrative","rarity":"common|uncommon|rare|epic|legendary","weight":number,"value":number,"quantity":number,"origin":string,"narrativeEffects":string[],"mechanicalEffects":[{"type":"restore_hp|restore_mana|attribute_bonus|skill_bonus|unlock_action|unlock_location|unlock_dialogue|unlock_profession|trigger_event|damage_bonus|defense_bonus","target":string,"value":number}],"durability":number|null}],"spells":[{"name":string,"fantasy":string,"suggestedType":"attack|healing|defense|control|utility|summoning|movement|narrative","suggestedPower":"low|medium|high","element":string,"origin":string}],"mechanicalEffects":[{"type":"damage_player|heal_player|restore_mana|change_gold|change_reputation","amount":number,"target":string,"reason":string}]}}.
+  const contract = `Retorne exatamente estas chaves: {"narrative":string,"requiresDice":boolean,"diceType":"d20","difficulty":number|null,"skill":string|null,"attribute":string|null,"reason":string|null,"actionInterpretation":{"rawAction":string,"intent":string,"domain":"combat|movement|social|romance|knowledge|craft|survival|perception|stealth|commerce|magic|performance|medicine|exploration|general","proposedSkill":string,"proposedAttribute":"strength|dexterity|constitution|intelligence|wisdom|charisma","actionMethod":string,"targetId":string,"requiresRoll":boolean,"opposed":boolean,"riskLevel":"none|low|medium|high|extreme","reasoning":string,"possibleExistingSkillKeys":string[],"trainable":boolean,"trivial":boolean,"consentRequired":boolean}|null,"npcActions":string[],"worldSuggestions":string[],"memoryUpdate":string[],"memorySummary":string,"worldDelta":{"locations":[{"name":string,"region":string,"kind":string,"description":string,"visualIdentity":{"architecture":string,"palette":string[],"fixedObjects":string[]}}],"currentLocationName":string|null,"npcs":[{"name":string,"role":string,"personality":string,"goal":string,"profession":string,"locationName":string,"visualAppearance":{"clothing":string,"hair":string,"accessories":string[],"weapon":string,"apparentAge":string,"palette":string[]}}],"npcChanges":[{"name":string,"status":"active|dead|missing|departed","memory":string}],"opportunities":string[],"quests":[{"title":string,"description":string,"objective":string,"status":"active|completed|failed|abandoned"}],"worldChanges":string[],"items":[{"name":string,"description":string,"category":"consumable|tool|weapon|armor|accessory|material|quest|document|key|relic|narrative","rarity":"common|uncommon|rare|epic|legendary","weight":number,"value":number,"quantity":number,"origin":string,"narrativeEffects":string[],"mechanicalEffects":[{"type":"restore_hp|restore_mana|attribute_bonus|skill_bonus|unlock_action|unlock_location|unlock_dialogue|unlock_profession|trigger_event|damage_bonus|defense_bonus","target":string,"value":number}],"durability":number|null}],"spells":[{"name":string,"fantasy":string,"suggestedType":"attack|healing|defense|control|utility|summoning|movement|narrative","suggestedPower":"low|medium|high","element":string,"origin":string}],"mechanicalEffects":[{"type":"damage_player|heal_player|restore_mana|change_gold|change_reputation","amount":number,"target":string,"reason":string}]}}.
 Use arrays vazias quando não houver mudança e currentLocationName null quando o jogador não mudou de local. Crie objetivos somente quando surgirem organicamente das escolhas, desejos ou consequências; nunca os chame de missão principal.
-Se um NPC ficou indisponível, registre npcChanges e crie ao menos uma oportunidade coerente que não dependa dele. Se a Engine já criou pendingRoll, preserve seus dados. Se há rollResult, narre o resultado e não peça o mesmo teste novamente.
+Se um NPC ficou indisponível, registre npcChanges e crie ao menos uma oportunidade coerente que não dependa dele. Se a Engine já criou pendingRoll, preserve seus dados.
+Quando houver rollResult, context.scene.previousNarrative é a cena imediatamente anterior ao dado. Continue diretamente dessa cena e resolva exatamente playerAction conforme die, total, difficulty, success e critical. Mostre uma consequência ficcional específica, perceptível e ligada às pessoas, objetos e perigos já presentes; não use frases genéricas como "o teste teve sucesso", "o teste falhou" ou "a situação muda". Não peça o mesmo teste novamente, não ofereça uma nova rolagem e devolva requiresDice false.
 memorySummary deve ter no máximo 900 caracteres e preservar origem, locais, pessoas, relações, eventos, objetivos e mudanças duradouras. Só consolide o resumo quando context.memory.mustConsolidateSummary for true; caso contrário, devolva o resumo atual. memoryUpdate contém apenas fatos canônicos permanentes, nunca detalhes triviais.
 Só sugira um item quando a narrativa disser explicitamente que o personagem o adquiriu, encontrou, recebeu, roubou ou fabricou. Use no máximo um item por turno. O nome exato precisa aparecer na narrativa. Todo item deve possuir pelo menos um efeito mecânico real e coerente; a Engine validará e poderá rejeitar a sugestão. Nunca altere diretamente o inventário.
-Só sugira magia quando o personagem realmente a aprender por treino, mestre, item, descoberta ou consequência. A Engine define custo, dano, cura e cooldown. mechanicalEffects são sugestões factuais da consequência narrada; use valores pequenos e nunca altere estado apenas no texto. Se a ação do jogador for possível e não exigir dado, faça a situação avançar concretamente e preencha os deltas correspondentes. Nunca responda com uma paráfrase genérica da ação.`;
+Só sugira magia quando o personagem realmente a aprender por treino, mestre, item, descoberta ou consequência. A Engine define custo, dano, cura e cooldown. mechanicalEffects são sugestões factuais da consequência narrada; use valores pequenos e nunca altere estado apenas no texto. Se a ação do jogador for possível e não exigir dado, faça a situação avançar concretamente e preencha os deltas correspondentes. Nunca responda com uma paráfrase genérica da ação.
+actionInterpretation é apenas uma proposta semântica para a Engine validar. Interprete intenção, método, objeto, alvo, duração, risco e oposição; não escolha CD final. Use null quando a Engine já forneceu pendingRoll ou rollResult. Romance nunca é controle mental: Sedução usa Carisma para a qualidade da abordagem, enquanto perceber receptividade usa Sabedoria + Empatia, e nenhuma rolagem substitui consentimento, limites, personalidade ou objetivos do NPC.`;
   try {
     const reply = await requestJson<GameMasterReply>(`${baseRules}\n${contract}`, JSON.stringify({ context, playerAction: action, rollResult: rollResult || null }), 1800);
-    if (!reply) return { reply: fallbackReply(state, fallbackNarrative, action), mode: 'fallback', error: 'Nenhum provedor narrativo está disponível.' };
-    if (typeof reply.narrative !== 'string' || !reply.narrative.trim()) reply.narrative = fallbackReply(state, fallbackNarrative, action).narrative;
+    if (!reply) return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: 'Nenhum provedor narrativo está disponível.' };
+    if (typeof reply.narrative !== 'string' || !reply.narrative.trim()) {
+      return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: 'A IA retornou uma consequência narrativa vazia.' };
+    }
+    if (rollResult?.consentRequired && violatesConsentContract(reply.narrative)) {
+      return { reply: fallbackReply(state, fallbackNarrative, action, true), mode: 'fallback', error: 'A consequência da IA violou o contrato de consentimento e foi rejeitada.' };
+    }
     reply.requiresDice = Boolean(reply.requiresDice);
+    if (rollResult) {
+      reply.requiresDice = false;
+      reply.difficulty = null;
+      reply.skill = null;
+      reply.attribute = null;
+      reply.reason = null;
+    }
     reply.worldDelta ||= {};
     reply.worldDelta.locations ||= []; reply.worldDelta.npcs ||= []; reply.worldDelta.npcChanges ||= []; reply.worldDelta.opportunities ||= []; reply.worldDelta.quests ||= []; reply.worldDelta.worldChanges ||= []; reply.worldDelta.items ||= []; reply.worldDelta.spells ||= []; reply.worldDelta.mechanicalEffects ||= [];
     reply.memoryUpdate ||= [];
@@ -71,7 +91,7 @@ Só sugira magia quando o personagem realmente a aprender por treino, mestre, it
     return { reply, mode: 'ai' };
   } catch (error) {
     console.error('INFINITA Game Master failed', error);
-    return { reply: fallbackReply(state, fallbackNarrative, action), mode: 'fallback', error: error instanceof Error ? error.message : 'Falha no provedor de IA.' };
+    return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: error instanceof Error ? error.message : 'Falha no provedor de IA.' };
   }
 }
 
