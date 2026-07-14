@@ -32,7 +32,7 @@ Imagem (opcional):
 
 Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o turno. Um circuit breaker interrompe tentativas repetidas e o jogador recebe imediatamente o melhor asset local ou o fallback estático.
 
-## Memória narrativa e estado v5
+## Memória narrativa e estado v7
 
 - `World Genesis`: prompt original integral e resumo estruturado imutável da origem.
 - `Canon Memory`: fatos permanentes, mortes, partidas, mudanças mundiais e conclusões.
@@ -42,7 +42,16 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 - Memória própria de NPC: primeira impressão, confiança, favores, conflitos, eventos e assuntos pendentes.
 - Memória de objetivo: origem, motivo, progresso, consequências e relação pessoal.
 
-`lib/memory/memory-builder.ts` reconstrói somente o contexto relevante antes de cada chamada ao modelo. O validador impede que NPCs mortos, desaparecidos ou que partiram sejam recriados como ativos. Saves v2/v3/v4 são migrados para v5 no carregamento.
+`lib/memory/memory-builder.ts` reconstrói somente o contexto relevante antes de cada chamada ao modelo. O validador impede que NPCs mortos, desaparecidos ou que partiram sejam recriados como ativos. Saves v2–v6 são migrados para v7 no carregamento. Antes da migração no navegador, o conteúdo original recebe uma cópia em `infinita-migration-backup:*` para rollback manual.
+
+## Consistência transacional v2
+
+- Cada ação recebe `requestId`, convertido em `turnId`; IDs já processados não reaplicam efeitos.
+- `lib/events/event-bus.ts` define eventos tipados e sincroniza objetivos inscritos sem usar texto narrativo como estado mecânico.
+- O LLM interpreta e sugere `worldDelta`; somente a Engine valida e aplica dano, cura, mana, dinheiro, reputação, locais, NPCs, itens, objetivos e magias.
+- `lib/magic/magic-engine.ts` normaliza magias procedurais por nível, controla mana, cooldown, dano, cura e efeitos ativos.
+- O mapa aceita tipos emergentes de local, preserva conexões, visita, estado, presença de NPCs e um único local atual.
+- HP, mana e energia têm limites persistidos e a HUD lê diretamente o save.
 
 ## Ciclo visual persistente
 
@@ -52,6 +61,42 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 - Cliques em menus não contam; texto aceito, dado concluído e escolhas contextuais persistidas contam.
 - Se a OpenAI estiver indisponível, o jogo usa o melhor cache e depois o pergaminho, sem interromper texto ou input.
 - O pergaminho está isolado em `components/ParchmentWriting.tsx`; a fonte fica em `public/assets/parchment-writing-source-v1.png` e o loop otimizado em `public/assets/parchment-writing-v1.gif`.
+
+## Engine Update v1.0
+
+### Performance
+
+- O contexto do LLM remove duplicações entre mundo, memória, NPCs e objetivos e é memorizado por revisão do save.
+- Após o schema transacional v7, o benchmark de 80 turnos usa um save de 26.329 bytes e mantém o contexto narrativo em 2.794 bytes: **89,4% menos dados enviados ao modelo**. Antes da revisão, eram 17.058/2.794 bytes e 83,6% de redução; o crescimento do save corresponde ao histórico tipado e à idempotência, sem aumentar tokens enviados ao LLM.
+- O autosave v8 mantém um índice pequeno e serializa somente campanhas cuja revisão mudou; saves v3–v7 continuam migrando automaticamente.
+- `SceneVisual`, áudio e cutscene usam code splitting; inventário e cena são memoizados contra renders causados pela digitação.
+- Failover usa timeout adaptativo: Groq 8s, Gemini 10s e OpenAI 12s, salvo configuração explícita.
+- A API de turno expõe `Server-Timing` para separar tempo da Engine, LLM e total.
+- Imagens continuam assíncronas e não bloqueiam o input nem a resposta textual. Qualidade e resolução do provedor não foram reduzidas porque o profiling apontou contexto/failover/autosave como gargalos principais.
+- Execute `pnpm profile` para repetir o profiling local.
+
+### Item Engine
+
+`lib/items/item-engine.ts` é a autoridade para criação, validação e transações. Cada item possui categoria, raridade, peso, valor, estado, origem, efeitos narrativos e mecânicos, stack, durabilidade, proprietário e histórico.
+
+Categorias suportadas: consumível, ferramenta, arma, armadura, acessório, material, item de missão, documento, chave, relíquia e objeto narrativo.
+
+Operações persistentes:
+
+- usar, equipar e guardar;
+- emprestar, vender, perder, roubar, destruir e descartar;
+- fabricar, combinar e reparar;
+- comprar por meio da economia local.
+
+O modelo pode apenas sugerir `worldDelta.items`. A Engine exige que o nome apareça na narrativa, limita a um item por turno, rejeita duplicatas e exige pelo menos um efeito mecânico válido. O registro `world.itemRegistry` preserva o item mesmo depois de vendido, emprestado, consumido, perdido ou destruído.
+
+### Interface
+
+- Logo do menu reduzido aproximadamente 25%, sem alterar proporção.
+- Pequenos atores pixel art fazem corrida, duelo, treino, brincadeira e magia em loops discretos ao redor do logo.
+- Cutscene em sprites dura cinco segundos; `PULAR` permanece sempre disponível e `COMEÇAR JORNADA` surge em 3,5 segundos.
+- Inventário usa fichas expansíveis com efeito, peso, raridade, durabilidade e ações contextuais.
+- Em telas pequenas, HUD vira interface de aplicativo com painel lateral e barra de ação fixa.
 
 ## Banco visual acumulativo
 

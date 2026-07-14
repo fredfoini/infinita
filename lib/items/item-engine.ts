@@ -58,7 +58,7 @@ export function materializeItemSuggestion(state: GameState, suggestion: NonNulla
 
 export function registerSuggestedItems(inputState: GameState, suggestions: NarrativeWorldDelta['items'], narrative: string) {
   if (!suggestions?.length) return { state: inputState, created: [] as Item[] };
-  const state = structuredClone(inputState);
+  const state = inputState;
   const created: Item[] = [];
   for (const suggestion of suggestions.slice(0, 1)) {
     const item = materializeItemSuggestion(state, suggestion, narrative);
@@ -117,8 +117,12 @@ export function executeItemAction(inputState: GameState, input: ItemActionInput)
   if (input.action === 'use') {
     messages.push(...applyEffects(state, item));
     if (item.durability) item.durability.current = Math.max(0, item.durability.current - 1);
-    if (item.category === 'consumable') removeOne(state, item);
-    record(item, state, 'used', messages.join(' ') || `Uso de ${item.name}.`);
+    if (item.category === 'consumable') {
+      const consumedStack = item.quantity === 1;
+      removeOne(state, item);
+      if (consumedStack) { item.state = 'consumed'; record(item, state, 'consumed', messages.join(' ') || `Uso de ${item.name}.`, 'world:consumed'); }
+      else record(item, state, 'used', messages.join(' ') || `Uso de ${item.name}.`);
+    } else record(item, state, 'used', messages.join(' ') || `Uso de ${item.name}.`);
   } else if (input.action === 'equip') {
     if (!['weapon', 'armor', 'accessory', 'tool'].includes(item.category)) throw new Error('Este item não pode ser equipado.');
     item.equipped = !item.equipped; item.state = item.equipped ? 'equipped' : 'carried'; record(item, state, item.equipped ? 'equipped' : 'unequipped', item.equipped ? 'Equipado.' : 'Guardado na mochila.');
@@ -130,7 +134,7 @@ export function executeItemAction(inputState: GameState, input: ItemActionInput)
     if (!npc) throw new Error('Não há alguém presente para receber o item.');
     item.state = 'lent'; item.equipped = false; record(item, state, 'lent', `Emprestado a ${npc.name}.`, npc.id); state.character.inventory = state.character.inventory.filter(candidate => candidate.id !== item!.id); messages.push(`${item.name} foi emprestado a ${npc.name}.`);
   } else if (input.action === 'sell') {
-    const gold = Math.max(1, Math.round(item.value * RARITY_VALUE[item.rarity] * .55)); removeOne(state, item); record(item, state, 'sold', `Vendido por ${gold} moedas.`, 'world:market'); state.character.gold += gold; messages.push(`${item.name} vendido por ${gold} moedas.`);
+    const gold = Math.max(1, Math.round(item.value * RARITY_VALUE[item.rarity] * .55)); const soldStack = item.quantity === 1; removeOne(state, item); item.state = soldStack ? 'sold' : 'carried'; record(item, state, 'sold', `Vendido por ${gold} moedas.`, soldStack ? 'world:market' : state.character.name); state.character.gold += gold; messages.push(`${item.name} vendido por ${gold} moedas.`);
   } else if (['lose', 'destroy', 'discard'].includes(input.action)) {
     item.equipped = false; item.state = input.action === 'lose' ? 'lost' : input.action === 'destroy' ? 'destroyed' : 'discarded'; record(item, state, input.action, `${item.name}: ${item.state}.`, 'world'); state.character.inventory = state.character.inventory.filter(candidate => candidate.id !== item!.id); messages.push(`${item.name} foi ${item.state === 'lost' ? 'perdido' : item.state === 'destroyed' ? 'destruído' : 'descartado'}.`);
   } else if (input.action === 'repair') {
@@ -141,7 +145,10 @@ export function executeItemAction(inputState: GameState, input: ItemActionInput)
   } else if (input.action === 'craft' || input.action === 'combine') {
     const second = state.character.inventory.find(candidate => candidate.id === input.secondaryItemId) || state.character.inventory.find(candidate => candidate.id !== item!.id && ['material', 'tool'].includes(candidate.category));
     if (!second) throw new Error('É necessário outro material ou ferramenta para combinar.');
-    const result = craftedItem(state, item, second); removeOne(state, item); removeOne(state, second); state.character.inventory.push(result); state.world.itemRegistry[result.id] = structuredClone(result); messages.push(`${result.name} foi fabricado e seus efeitos já estão ativos para uso.`);
+    const result = craftedItem(state, item, second); const firstConsumed = item.quantity === 1; const secondConsumed = second.quantity === 1; removeOne(state, item); removeOne(state, second);
+    if (firstConsumed) { item.state = 'consumed'; record(item, state, 'crafted', `Consumido na fabricação de ${result.name}.`, 'world:craft'); }
+    if (secondConsumed) { second.state = 'consumed'; record(second, state, 'crafted', `Consumido na fabricação de ${result.name}.`, 'world:craft'); }
+    state.world.itemRegistry[second.id] = structuredClone(second); state.character.inventory.push(result); state.world.itemRegistry[result.id] = structuredClone(result); messages.push(`${result.name} foi fabricado e seus efeitos já estão ativos para uso.`);
   } else if (input.action === 'steal') messages.push(`${item.name} agora está com ${state.character.name}.`);
 
   state.world.itemRegistry[item.id] = structuredClone(item);

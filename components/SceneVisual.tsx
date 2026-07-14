@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { GameState } from '@/lib/engine';
 import ParchmentWriting from '@/components/ParchmentWriting';
 import { createSceneVisualDescriptor } from '@/lib/visual/scene-descriptor';
@@ -18,11 +18,13 @@ type SceneVisualProps = {
   onIllustrationResolved?: (assetId: string, generated: boolean) => void;
 };
 
-export default function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
+function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
   const cycle = state.visualCycle;
   const descriptor = useMemo(
     () => createSceneVisualDescriptor(state),
-    [state.campaignId, cycle.phaseStartAction, state.world.currentLocationId, state.world.weather, state.world.hour, state.session.narrative],
+    // O descritor é congelado no início do bloco; mudanças internas não podem trocar a imagem ativa.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [state.campaignId, cycle.phaseStartAction],
   );
   const [asset, setAsset] = useState<VisualAsset | null>(null);
   const [status, setStatus] = useState<'parchment' | 'cache' | 'generating'>('parchment');
@@ -90,11 +92,15 @@ export default function SceneVisual({ state, onIllustrationResolved }: SceneVisu
       updateVisualMetrics({ providerFailures: 1, categoryMiss: descriptor.primaryEmotion });
     });
     return () => { cancelled = true; };
-  }, [state.campaignId, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId]);
+  }, [state.campaignId, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId, descriptor, onIllustrationResolved]);
 
   return <div className="scene-visual" data-source={status} data-phase={cycle.currentPhase}>
     <ParchmentWriting />
-    {asset && <img className="cycle-illustration" src={asset.fileUrl} alt={`Cena em ${descriptor.locationType}: ${descriptor.primaryEmotion}`} draggable={false} />}
+    {/* Assets do banco podem ser data URLs; o otimizador do Next não materializa esse formato. */}
+    {/* eslint-disable-next-line @next/next/no-img-element */}
+    {asset && <img className="cycle-illustration" src={asset.fileUrl} alt={`Cena em ${descriptor.locationType}: ${descriptor.primaryEmotion}`} draggable={false} decoding="async" />}
     {status === 'generating' && <span className="visual-loading">ILUSTRANDO A CRÔNICA...</span>}
   </div>;
 }
+
+export default memo(SceneVisual, (previous, next) => previous.state === next.state);

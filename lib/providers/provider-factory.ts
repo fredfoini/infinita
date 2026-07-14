@@ -8,8 +8,12 @@ type FailoverRecord = { provider: NarrativeProviderId; reason: string };
 export type ProviderFactoryResult<T> = { data: T; provider: NarrativeProviderId; usage?: NarrativeUsage; failovers: FailoverRecord[] };
 
 const circuits = new Map<NarrativeProviderId, Circuit>();
-const timeoutMs = Math.max(3000, Number(process.env.NARRATIVE_PROVIDER_TIMEOUT_MS) || 18000);
 const circuitCooldownMs = Math.max(10000, Number(process.env.NARRATIVE_CIRCUIT_COOLDOWN_MS) || 120000);
+function providerTimeout(id: NarrativeProviderId) {
+  const shared = Number(process.env.NARRATIVE_PROVIDER_TIMEOUT_MS);
+  if (shared > 0) return Math.max(3000, shared);
+  return id === 'groq' ? 8000 : id === 'gemini' ? 10000 : 12000;
+}
 
 function providers(): NarrativeProvider[] { return [new GroqProvider(), new GeminiProvider(), new OpenAIProvider()]; }
 function stateFor(id: NarrativeProviderId) { return circuits.get(id) || { failures: 0, unavailableUntil: 0 }; }
@@ -37,7 +41,7 @@ export class ProviderFactory {
         continue;
       }
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), providerTimeout(provider.id));
       const started = Date.now();
       try {
         const result = await provider.generateJson<T>(request, controller.signal);

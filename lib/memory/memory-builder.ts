@@ -3,6 +3,7 @@ import type { GameEvent, GameState, MemoryState, NarrativeWorldDelta, NPC, Quest
 const IMPORTANT_EVENT = /morreu|morte|casamento|casou|profiss[aã]o|neg[oó]cio|fundou|descobriu|nova regi[aã]o|pol[ií]tic|grande combate|derrotou|conclu[ií]d|transform/i;
 const unique = (values: string[], limit: number) => Array.from(new Set(values.map(value => value.trim()).filter(Boolean))).slice(-limit);
 const clip = (value: string, max: number) => value.trim().replace(/\s+/g, ' ').slice(0, max);
+const contextCache = new WeakMap<GameState, ReturnType<typeof buildMemoryContextUncached>>();
 
 export function createMemoryState(prompt: string, summary: string, createdAt: string): MemoryState {
   return {
@@ -72,25 +73,34 @@ function questMemory(quest: Quest) {
   };
 }
 
-export function buildMemoryContext(state: GameState) {
+function buildMemoryContextUncached(state: GameState) {
   const location = state.world.locations[state.world.currentLocationId] || Object.values(state.world.locations)[0];
+  const allNpcs = Object.values(state.world.npcs);
   const relevantNpcIds = new Set([
-    ...Object.values(state.world.npcs).filter(npc => npc.locationId === location?.id).map(npc => npc.id),
+    ...allNpcs.filter(npc => npc.locationId === location?.id).map(npc => npc.id),
     ...state.campaign.memory.anchor.importantRelationships,
   ]);
-  const relevantNpcs = Object.values(state.world.npcs).filter(npc => relevantNpcIds.has(npc.id)).slice(0, 8).map(npcMemory);
-  const activeQuests = state.campaign.quests.filter(quest => quest.status === 'active').slice(0, 8).map(questMemory);
+  const relevantNpcs = allNpcs.filter(npc => relevantNpcIds.has(npc.id)).slice(0, 5).map(npcMemory);
+  const activeQuests = state.campaign.quests.filter(quest => quest.status === 'active').slice(0, 5).map(questMemory);
   return {
-    worldGenesis: state.campaign.memory.worldGenesis,
-    canon: state.campaign.memory.canon.slice(-24),
+    worldGenesis: { originalPrompt: state.campaign.memory.worldGenesis.originalPrompt, structuredSummary: state.campaign.memory.worldGenesis.structuredSummary },
+    canon: state.campaign.memory.canon.slice(-12).map(fact => ({ category: fact.category, text: fact.text, turn: fact.turn })),
     campaignSummary: state.campaign.memory.campaignSummary,
-    sessionMemory: state.campaign.memory.session.slice(-10),
+    sessionMemory: state.campaign.memory.session.slice(-6).map(entry => ({ turn: entry.turn, text: entry.text, importance: entry.importance })),
     narrativeAnchor: state.campaign.memory.anchor,
-    currentLocation: location,
+    currentLocation: location ? { id: location.id, name: location.name, region: location.region } : null,
     relevantNpcs,
     quests: activeQuests,
     mustConsolidateSummary: shouldConsolidateMemory(state),
   };
+}
+
+export function buildMemoryContext(state: GameState) {
+  const cached = contextCache.get(state);
+  if (cached) return cached;
+  const context = buildMemoryContextUncached(state);
+  contextCache.set(state, context);
+  return context;
 }
 
 export function appendSessionMemory(memory: MemoryState, turn: number, text: string, importance: 'normal' | 'major' = 'normal'): MemoryState {

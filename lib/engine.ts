@@ -1,6 +1,6 @@
 export type AttributeKey = 'Força' | 'Destreza' | 'Constituição' | 'Inteligência' | 'Sabedoria' | 'Carisma';
 export type Attributes = Record<AttributeKey, number>;
-export type EventKind = 'action' | 'roll' | 'xp' | 'skill' | 'level' | 'item' | 'gold' | 'reputation' | 'quest' | 'world' | 'combat' | 'system';
+export type EventKind = 'action' | 'roll' | 'xp' | 'skill' | 'level' | 'item' | 'gold' | 'reputation' | 'quest' | 'world' | 'combat' | 'magic' | 'system';
 export type SkillRank = 'Iniciante' | 'Aprendiz' | 'Competente' | 'Especialista' | 'Mestre' | 'Lendário';
 
 export type Skill = {
@@ -15,7 +15,7 @@ export type Skill = {
 
 export type ItemCategory = 'consumable' | 'tool' | 'weapon' | 'armor' | 'accessory' | 'material' | 'quest' | 'document' | 'key' | 'relic' | 'narrative';
 export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
-export type ItemState = 'carried' | 'equipped' | 'stored' | 'lent' | 'lost' | 'stolen' | 'destroyed' | 'discarded';
+export type ItemState = 'carried' | 'equipped' | 'stored' | 'lent' | 'sold' | 'consumed' | 'lost' | 'stolen' | 'destroyed' | 'discarded';
 export type ItemMechanicalEffect = { type: 'restore_hp' | 'restore_mana' | 'attribute_bonus' | 'skill_bonus' | 'unlock_action' | 'unlock_location' | 'unlock_dialogue' | 'unlock_profession' | 'trigger_event' | 'damage_bonus' | 'defense_bonus'; target?: string; value: number; duration?: number };
 export type ItemHistoryEntry = { turn: number; action: string; detail: string; ownerId: string; createdAt: string };
 
@@ -41,9 +41,16 @@ export type Item = {
 
 export type GameEvent = {
   id: string;
+  campaignId: string;
+  turnId: string;
   turn: number;
+  eventType: import('@/lib/events/event-bus').GameEventType;
   type: EventKind;
-  source: 'player' | 'engine' | 'npc' | 'world' | 'combat';
+  source: 'player' | 'engine' | 'npc' | 'world' | 'combat' | 'llm_suggestion';
+  actorId?: string;
+  targetIds: string[];
+  payload: Record<string, unknown>;
+  schemaVersion: 1;
   priority: number;
   text: string;
   persistent: boolean;
@@ -53,28 +60,44 @@ export type GameEvent = {
 import { appendSessionMemory, buildMemoryContext, createMemoryState, migrateMemory, updateNarrativeMemory } from '@/lib/memory/memory-builder';
 import { advanceVisualCycle, attachCycleIllustration, createVisualCycle, migrateVisualCycle, type CampaignVisualCycle } from '@/lib/visual/visual-cycle';
 import { equipmentEffectTotal, executeItemAction, normalizeItem, registerSuggestedItems, type ItemActionInput } from '@/lib/items/item-engine';
+import { reduceGameEvents, type EventDraft, type GameEventType } from '@/lib/events/event-bus';
+import { castSpell, learnSuggestedSpells, tickSpellCooldowns, type Spell, type SpellSuggestion } from '@/lib/magic/magic-engine';
 
 export type Quest = {
   id: string;
   title: string;
   description: string;
-  objectives: Array<{ id: string; text: string; completed: boolean }>;
-  status: 'active' | 'completed' | 'failed' | 'abandoned';
+  objectives: Array<{ id: string; text: string; completed: boolean; conditionType: string; currentValue: number | boolean | string; targetValue: number | boolean | string; status: 'locked' | 'active' | 'completed' | 'failed'; eventSubscriptions: GameEventType[] }>;
+  status: 'available' | 'active' | 'completed' | 'failed' | 'abandoned' | 'obsolete';
   rewardXp: number;
   rewardGold: number;
   source: 'emergent';
+  originType: 'player_goal' | 'npc_request' | 'world_event' | 'discovery' | 'contract' | 'consequence';
+  originEventId: string;
+  relevantNpcIds: string[];
+  relevantLocationIds: string[];
+  consequences: string[];
+  rewards: Array<{ type: 'xp' | 'gold'; amount: number }>;
+  createdAt: string;
+  updatedAt: string;
   memory: { origin: string; motive: string; progress: string[]; consequences: string[]; personalGoal: string };
 };
 
 export type NPC = {
   id: string;
+  campaignId: string;
   name: string;
   role: string;
   personality: string;
   goal: string;
+  goals: string[];
   profession: string;
   locationId: string;
   relationship: number;
+  relationships: Array<{ npcId: string; kind: string; value: number }>;
+  reputationWithPlayer: number;
+  inventoryIds: string[];
+  createdFromEventId: string;
   knowledge: string[];
   memories: string[];
   status: 'active' | 'dead' | 'missing' | 'departed';
@@ -84,11 +107,23 @@ export type NPC = {
 
 export type Location = {
   id: string;
+  campaignId: string;
   name: string;
   region: string;
-  kind: 'city' | 'village' | 'tavern' | 'forest' | 'river' | 'road' | 'ruin' | 'wild';
+  kind: string;
   description: string;
   discovered: boolean;
+  visited: boolean;
+  current: boolean;
+  status: 'active' | 'destroyed' | 'abandoned' | 'inaccessible';
+  parentLocationId?: string;
+  connectedLocationIds: string[];
+  residentNpcIds: string[];
+  presentNpcIds: string[];
+  tags: string[];
+  createdFromEventId: string;
+  createdAt: string;
+  updatedAt: string;
   visualIdentity: { architecture: string; palette: string[]; fixedObjects: string[] };
 };
 
@@ -138,7 +173,7 @@ export type MemoryState = {
 };
 
 export type GameState = {
-  schemaVersion: 6;
+  schemaVersion: 7;
   campaignId: string;
   visualCycle: CampaignVisualCycle;
   campaign: {
@@ -166,6 +201,8 @@ export type GameState = {
     maxHp: number;
     mana: number;
     maxMana: number;
+    energy: number;
+    maxEnergy: number;
     gold: number;
     skills: Record<string, Skill>;
     inventory: Item[];
@@ -173,6 +210,8 @@ export type GameState = {
     professions: string[];
     titles: string[];
     conditions: Array<{ name: string; remainingTurns: number; modifier: number }>;
+    activeEffects: Array<{ id: string; name: string; type: string; value: number; remainingTurns: number }>;
+    spells: Spell[];
   };
   world: {
     day: number;
@@ -192,6 +231,7 @@ export type GameState = {
     };
     reputation: Reputation;
     timeline: GameEvent[];
+    processedTurnIds: string[];
   };
   session: {
     turn: number;
@@ -199,6 +239,7 @@ export type GameState = {
     recentActions: string[];
     pendingRoll: PendingRoll | null;
     lastRoll: RollResult | null;
+    currentTurnId: string;
     events: GameEvent[];
     combat: null | {
       enemyName: string;
@@ -229,6 +270,8 @@ export type NarrativeWorldDelta = {
     name: string; description: string; category: ItemCategory; rarity?: ItemRarity; weight?: number; value?: number; quantity?: number;
     origin: string; narrativeEffects?: string[]; mechanicalEffects: ItemMechanicalEffect[]; durability?: number | null;
   }>;
+  spells?: SpellSuggestion[];
+  mechanicalEffects?: Array<{ type: 'damage_player' | 'heal_player' | 'restore_mana' | 'change_gold' | 'change_reputation'; amount: number; target?: string; reason: string }>;
 };
 
 export type CampaignGenesisPayload = {
@@ -256,6 +299,7 @@ const uid = () => typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.ra
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const clean = (value: string, max = 240) => value.trim().replace(/\s+/g, ' ').slice(0, max);
 const hash = (value: string) => Array.from(value).reduce((sum, char) => ((sum << 5) - sum + char.charCodeAt(0)) | 0, 0) >>> 0;
+const aiContextCache = new Map<string, ReturnType<typeof buildAiContextUncached>>();
 const defaultVisualIdentity = (kind: Location['kind'], description = ''): Location['visualIdentity'] => ({
   architecture: clean(description || `${kind} com arquitetura própria da região`, 160), palette: ['violeta profundo', 'dourado suave', 'tons naturais'], fixedObjects: [],
 });
@@ -302,17 +346,30 @@ function startingAttributes(className: string): Attributes {
   return values;
 }
 
-function makeEvent(state: GameState, type: EventKind, text: string, source: GameEvent['source'] = 'engine', priority = 50, persistent = true): GameEvent {
-  return { id: uid(), turn: state.session.turn, type, source, priority, text: clean(text, 320), persistent, createdAt: now() };
+const EVENT_TYPE_BY_KIND: Record<EventKind, GameEventType> = { action: 'ActionDeclared', roll: 'RollResolved', xp: 'WorldChanged', skill: 'WorldChanged', level: 'WorldChanged', item: 'ItemUsed', gold: 'CurrencyChanged', reputation: 'ReputationChanged', quest: 'QuestProgressed', world: 'WorldChanged', combat: 'DamageApplied', magic: 'SpellCast', system: 'WorldChanged' };
+
+function makeEvent(state: GameState, type: EventKind, text: string, source: GameEvent['source'] = 'engine', priority = 50, persistent = true, detail: Partial<EventDraft> = {}): GameEvent {
+  return {
+    id: uid(), campaignId: state.campaignId, turnId: state.session.currentTurnId || `legacy-turn-${state.session.turn}`, turn: state.session.turn,
+    eventType: detail.type || EVENT_TYPE_BY_KIND[type], type, source: detail.source || source, actorId: state.character.name,
+    targetIds: detail.targetIds || [], payload: detail.payload || {}, schemaVersion: 1,
+    priority: detail.priority || priority, text: clean(detail.text || text, 320), persistent: detail.persistent ?? persistent, createdAt: now(),
+  };
 }
 
 function withEvents(state: GameState, events: GameEvent[]): GameState {
   const ordered = [...events].sort((a, b) => b.priority - a.priority);
-  return {
+  const next = {
     ...state,
     session: { ...state.session, events: [...ordered, ...state.session.events].slice(0, 30) },
     world: { ...state.world, timeline: [...state.world.timeline, ...ordered.filter(event => event.persistent)].slice(-300) },
   };
+  return reduceGameEvents(next, ordered);
+}
+
+function locationRecord(state: Pick<GameState, 'campaignId'>, value: Pick<Location, 'id' | 'name' | 'region' | 'kind' | 'description' | 'discovered' | 'visualIdentity'>, eventId = 'genesis'): Location {
+  const createdAt = now();
+  return { ...value, campaignId: state.campaignId, visited: value.discovered, current: false, status: 'active', connectedLocationIds: [], residentNpcIds: [], presentNpcIds: [], tags: [value.kind], createdFromEventId: eventId, createdAt, updatedAt: createdAt };
 }
 
 function advanceClock(state: GameState, hours = 1): GameState {
@@ -356,14 +413,15 @@ export function createInitialState(input: NewCampaignInput): GameState {
     Atletismo: makeSkill('Atletismo', 'Força'),
     Pesca: makeSkill('Pesca', 'Sabedoria'),
   };
-  const originLocation: Location = { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Cena Inicial', region: 'Região Desconhecida', kind: 'wild', description: clean(input.openingPrompt, 500), discovered: true, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) };
+  const originLocation = locationRecord({ campaignId }, { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Ponto de Origem', region: clean(`Região de ${input.campaignName}`, 80), kind: 'wild', description: clean(input.openingPrompt, 500), discovered: true, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) });
+  originLocation.current = true;
   const ownerId = clean(input.characterName, 60);
   const initialItems = [
     normalizeItem({ name: 'Ração de viagem', description: 'Recupera forças durante um descanso.', kind: 'consumível', category: 'consumable', quantity: 3, value: 2, effects: { narrative: ['Uma refeição simples torna a marcha suportável.'], mechanical: [{ type: 'restore_hp', value: 4 }] } }, ownerId, `Equipamento inicial de ${input.className}.`),
     normalizeItem({ name: 'Tocha', description: 'Ilumina locais escuros e permite explorar sem luz.', kind: 'ferramenta', category: 'tool', quantity: 1, value: 3, effects: { narrative: ['Afasta a escuridão imediata.'], mechanical: [{ type: 'unlock_action', target: 'explorar locais escuros', value: 1 }] } }, ownerId, `Equipamento inicial de ${input.className}.`),
   ];
   const state: GameState = {
-    schemaVersion: 6,
+    schemaVersion: 7,
     campaignId,
     visualCycle: createVisualCycle(campaignId),
     campaign: {
@@ -379,9 +437,9 @@ export function createInitialState(input: NewCampaignInput): GameState {
     character: {
       name: clean(input.characterName, 60), className: clean(input.className, 80), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
       level: 1, xp: 0, xpToNext: xpThreshold(2), attributePoints: 0, attributes,
-      hp: template.hp + attributeModifier(attributes.Constituição), maxHp: template.hp + attributeModifier(attributes.Constituição), mana: template.mana, maxMana: template.mana,
+      hp: template.hp + attributeModifier(attributes.Constituição), maxHp: template.hp + attributeModifier(attributes.Constituição), mana: template.mana, maxMana: template.mana, energy: 10, maxEnergy: 10,
       gold: 12, skills, inventory: initialItems, unlockedActions: [], professions: [opening.profession],
-      titles: [], conditions: [],
+      titles: [], conditions: [], activeEffects: [], spells: [],
     },
     world: {
       day: 1, hour: 8, weather: 'Tempo variável', currentLocationId: originLocation.id, locations: { [originLocation.id]: originLocation },
@@ -392,9 +450,9 @@ export function createInitialState(input: NewCampaignInput): GameState {
       itemRegistry: Object.fromEntries(initialItems.map(item => [item.id, structuredClone(item)])),
       unlocks: { locations: [], dialogues: [], events: [] },
       economy: { regionMultiplier: 1, shops: {} },
-      reputation: { individuals: {}, cities: { [originLocation.id]: 0 }, factions: {}, regions: { [originLocation.region]: 0 }, kingdoms: {}, moral: 0 }, timeline: [],
+      reputation: { individuals: {}, cities: { [originLocation.id]: 0 }, factions: {}, regions: { [originLocation.region]: 0 }, kingdoms: {}, moral: 0 }, timeline: [], processedTurnIds: [],
     },
-    session: { turn: 0, narrative: opening.narrative, recentActions: [], pendingRoll: null, lastRoll: null, events: [], combat: null },
+    session: { turn: 0, narrative: opening.narrative, recentActions: [], pendingRoll: null, lastRoll: null, currentTurnId: '', events: [], combat: null },
     save: { createdAt, updatedAt: createdAt, revision: 1 },
   };
   return state;
@@ -407,7 +465,7 @@ export function currentLocation(state: GameState) {
 export function inferSkill(action: string): { skill: string; attribute: AttributeKey } {
   const value = action.toLowerCase();
   if (/furt|roub|escond|silenc|arrom/.test(value)) return { skill: 'Furtividade', attribute: 'Destreza' };
-  if (/escalar|saltar|pular|equilíbrio|acrob/.test(value)) return { skill: 'Acrobacia', attribute: 'Destreza' };
+  if (/escal|salt|pul|equil[ií]br|acrob|abismo/.test(value)) return { skill: 'Acrobacia', attribute: 'Destreza' };
   if (/atac|lutar|golpear|espada|dispar|combate/.test(value)) return { skill: 'Combate', attribute: 'Força' };
   if (/correr|nadar|forçar|levantar|quebrar/.test(value)) return { skill: 'Atletismo', attribute: 'Força' };
   if (/convenc|negoci|persuad|acalmar|dialog/.test(value)) return { skill: 'Diplomacia', attribute: 'Carisma' };
@@ -420,7 +478,7 @@ export function inferSkill(action: string): { skill: string; attribute: Attribut
 }
 
 function detectRisk(action: string) {
-  return /atac|lutar|roub|furt|arrom|escalar|saltar|correr de|fugir|ameaç|engan|pesc|desarm|ritual|atravessar|invadir|perseguir/.test(action.toLowerCase());
+  return /atac|lut|roub|furt|arrom|escal|salt|pul|abismo|precip[ií]cio|correr de|fug|ameaç|engan|pesc|desarm|ritual|atravess|invad|persegu|perigo|sem ser visto/.test(action.toLowerCase());
 }
 
 function difficultyFor(action: string) {
@@ -449,7 +507,7 @@ function inferLocation(action: string, state: GameState): { location: Location; 
   const existing = state.world.locations[id];
   if (existing) return { location: existing, isNew: false };
   const description = `Local descoberto pelas ações do jogador: ${clean(action, 220)}`;
-  const location: Location = { id, name, region, kind: found[1], description, discovered: true, visualIdentity: defaultVisualIdentity(found[1], description) };
+  const location = locationRecord(state, { id, name, region, kind: found[1], description, discovered: true, visualIdentity: defaultVisualIdentity(found[1], description) }, state.session.currentTurnId || 'player-action');
   return { location, isNew: true };
 }
 
@@ -490,18 +548,21 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
     if (!name) continue;
     const region = clean(candidate.region || currentLocation(state).region, 80);
     const id = `location-${hash(`${region}:${name}`).toString(36)}`;
-    const allowedKinds: Location['kind'][] = ['city', 'village', 'tavern', 'forest', 'river', 'road', 'ruin', 'wild'];
-    const kind = allowedKinds.includes(candidate.kind) ? candidate.kind : 'wild';
+    const kind = clean(candidate.kind || 'wild', 40).toLowerCase();
     const description = clean(candidate.description || 'Local emergente.', 300);
-    const location: Location = { id, name, region, kind, description, discovered: true, visualIdentity: { ...defaultVisualIdentity(kind, description), ...candidate.visualIdentity } };
-    if (!state.world.locations[id]) events.push(makeEvent(state, 'world', `Local descoberto: ${name}.`, 'world', 65));
+    const location = locationRecord(state, { id, name, region, kind, description, discovered: true, visualIdentity: { ...defaultVisualIdentity(kind, description), ...candidate.visualIdentity } }, state.session.currentTurnId || 'llm-suggestion');
+    if (!state.world.locations[id]) events.push(makeEvent(state, 'world', `Local descoberto: ${name}.`, 'world', 65, true, { type: 'LocationCreated', targetIds: [id], payload: { locationId: id } }));
     state.world.locations[id] = location;
   }
   if (delta.currentLocationName) {
     const destination = Object.values(state.world.locations).find(location => location.name.toLowerCase() === delta.currentLocationName?.toLowerCase());
     if (destination && destination.id !== state.world.currentLocationId) {
+      const previous = currentLocation(state);
+      if (previous) { previous.current = false; previous.connectedLocationIds = Array.from(new Set([...previous.connectedLocationIds, destination.id])); previous.updatedAt = now(); }
       state.world.currentLocationId = destination.id;
-      events.push(makeEvent(state, 'world', `Local atual: ${destination.name}.`, 'world', 70));
+      destination.current = true; destination.visited = true; destination.updatedAt = now();
+      destination.connectedLocationIds = Array.from(new Set([...destination.connectedLocationIds, previous?.id].filter(Boolean) as string[]));
+      events.push(makeEvent(state, 'world', `Local atual: ${destination.name}.`, 'world', 70, true, { type: 'LocationDiscovered', targetIds: [destination.id], payload: { locationId: destination.id } }));
     }
   }
 
@@ -513,19 +574,25 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
     const previous = state.world.npcs[id];
     state.world.npcs[id] = {
       id, name,
+      campaignId: state.campaignId,
       role: clean(candidate.role || 'Pessoa do mundo', 80),
       personality: clean(candidate.personality || 'Personalidade ainda não revelada.', 140),
       goal: clean(candidate.goal || 'Possui interesses próprios.', 180),
+      goals: [clean(candidate.goal || 'Possui interesses próprios.', 180)],
       profession: clean(candidate.profession || 'Ocupação desconhecida', 80),
       locationId: targetLocation.id,
       relationship: previous?.relationship || 0,
+      relationships: previous?.relationships || [], reputationWithPlayer: previous?.reputationWithPlayer || previous?.relationship || 0,
+      inventoryIds: previous?.inventoryIds || [], createdFromEventId: previous?.createdFromEventId || state.session.currentTurnId || 'llm-suggestion',
       knowledge: previous?.knowledge || [],
       memories: previous?.memories || [],
       status: previous?.status || 'active',
       memoryProfile: previous?.memoryProfile || defaultNpcMemory(candidate.personality),
       visualAppearance: { ...(previous?.visualAppearance || defaultAppearance(candidate.profession)), ...candidate.visualAppearance },
     };
-    if (!previous) events.push(makeEvent(state, 'world', `Pessoa conhecida: ${name}.`, 'world', 55));
+    targetLocation.presentNpcIds = Array.from(new Set([...targetLocation.presentNpcIds, id]));
+    targetLocation.residentNpcIds = Array.from(new Set([...targetLocation.residentNpcIds, id]));
+    if (!previous) events.push(makeEvent(state, 'world', `Pessoa conhecida: ${name}.`, 'world', 55, true, { type: 'NpcCreated', targetIds: [id], payload: { npcId: id } }));
   }
 
   let continuityNeeded = false;
@@ -534,13 +601,15 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
     if (!npc) continue;
     const allowed: NPC['status'][] = ['active', 'dead', 'missing', 'departed'];
     npc.status = allowed.includes(change.status) ? change.status : npc.status;
+    const npcLocation = state.world.locations[npc.locationId];
+    if (npcLocation) npcLocation.presentNpcIds = npc.status === 'active' ? Array.from(new Set([...npcLocation.presentNpcIds, npc.id])) : npcLocation.presentNpcIds.filter(id => id !== npc.id);
     if (change.memory) {
       const memory = clean(change.memory, 180);
       npc.memories = [...npc.memories, memory].slice(-12);
       npc.memoryProfile.sharedEvents = [...npc.memoryProfile.sharedEvents, memory].slice(-20);
     }
     if (npc.status !== 'active') continuityNeeded = true;
-    events.push(makeEvent(state, 'world', `${npc.name}: ${npc.status}.`, 'world', 75));
+    events.push(makeEvent(state, 'world', `${npc.name}: ${npc.status}.`, 'world', 75, true, { type: npc.status === 'dead' ? 'NpcDied' : 'WorldChanged', targetIds: [npc.id], payload: { status: npc.status } }));
   }
 
   const opportunities = [...state.campaign.opportunities, ...(delta.opportunities || []).map(value => clean(value, 220)).filter(Boolean)];
@@ -563,9 +632,10 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
       if (status === 'completed') existing.objectives = existing.objectives.map(objective => ({ ...objective, completed: true }));
       if (justCompleted) { rewardXp += existing.rewardXp; rewardGold += existing.rewardGold; events.push(makeEvent(state, 'quest', `Objetivo concluído: ${existing.title}.`, 'engine', 90)); }
     } else {
-      const quest: Quest = { id: uid(), title, description: clean(update.description || title, 300), objectives: [{ id: uid(), text: clean(update.objective || update.description || title, 180), completed: status === 'completed' }], status, rewardXp: 35, rewardGold: 8, source: 'emergent', memory: { origin: `Surgiu no turno ${state.session.turn}.`, motive: clean(update.description || title, 240), progress: status === 'active' ? [] : [status], consequences: [], personalGoal: clean(update.objective || '', 180) } };
+      const timestamp = now();
+      const quest: Quest = { id: uid(), title, description: clean(update.description || title, 300), objectives: [{ id: uid(), text: clean(update.objective || update.description || title, 180), completed: status === 'completed', conditionType: 'quest_progress', currentValue: status === 'completed' ? 1 : 0, targetValue: 1, status: status === 'completed' ? 'completed' : 'active', eventSubscriptions: ['QuestProgressed'] }], status, rewardXp: 35, rewardGold: 8, source: 'emergent', originType: 'consequence', originEventId: state.session.currentTurnId || `turn-${state.session.turn}`, relevantNpcIds: [], relevantLocationIds: [state.world.currentLocationId], consequences: [], rewards: [{ type: 'xp', amount: 35 }, { type: 'gold', amount: 8 }], createdAt: timestamp, updatedAt: timestamp, memory: { origin: `Surgiu no turno ${state.session.turn}.`, motive: clean(update.description || title, 240), progress: status === 'active' ? [] : [status], consequences: [], personalGoal: clean(update.objective || '', 180) } };
       state.campaign.quests.push(quest);
-      events.push(makeEvent(state, 'quest', `Novo objetivo emergente: ${title}.`, 'world', 70));
+      events.push(makeEvent(state, 'quest', `Novo objetivo emergente: ${title}.`, 'world', 70, true, { type: 'QuestCreated', targetIds: [quest.id], payload: { questId: quest.id } }));
       if (status === 'completed') { rewardXp += quest.rewardXp; rewardGold += quest.rewardGold; }
     }
   }
@@ -578,6 +648,17 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
   const itemResult = registerSuggestedItems(state, delta.items, narrative);
   state = itemResult.state;
   for (const item of itemResult.created) events.push(makeEvent(state, 'item', `Item adquirido: ${item.name} (${item.rarity}). ${item.effects.mechanical.map(effect => effect.target || effect.type).join(', ')}.`, 'world', 78));
+  const learnedSpells = learnSuggestedSpells(state, delta.spells || []);
+  for (const spell of learnedSpells) events.push(makeEvent(state, 'magic', `Magia aprendida: ${spell.name}. Custo ${spell.manaCost} de mana.`, 'engine', 90, true, { type: 'SpellLearned', targetIds: [spell.id], payload: { spellId: spell.id, manaCost: spell.manaCost } }));
+  for (const effect of (delta.mechanicalEffects || []).slice(0, 4)) {
+    const amount = clamp(Math.abs(Number(effect.amount) || 0), 0, Math.max(1, state.character.level * 4 + 8));
+    if (!amount || !clean(effect.reason || '', 140)) continue;
+    if (effect.type === 'damage_player') { const before = state.character.hp; state.character.hp = clamp(before - amount, 0, state.character.maxHp); events.push(makeEvent(state, 'combat', `${state.character.name} sofreu ${before - state.character.hp} de dano: ${effect.reason}.`, 'engine', 88, true, { type: 'DamageApplied', targetIds: [state.character.name], payload: { amount: before - state.character.hp, reason: effect.reason } })); }
+    if (effect.type === 'heal_player') { const before = state.character.hp; state.character.hp = clamp(before + amount, 0, state.character.maxHp); events.push(makeEvent(state, 'combat', `${state.character.name} recuperou ${state.character.hp - before} de vitalidade: ${effect.reason}.`, 'engine', 82, true, { type: 'HealingApplied', targetIds: [state.character.name], payload: { amount: state.character.hp - before, reason: effect.reason } })); }
+    if (effect.type === 'restore_mana') { const before = state.character.mana; state.character.mana = clamp(before + amount, 0, state.character.maxMana); events.push(makeEvent(state, 'magic', `${state.character.mana - before} de mana restaurada: ${effect.reason}.`, 'engine', 82, true, { type: 'ManaRestored', targetIds: [state.character.name], payload: { amount: state.character.mana - before, reason: effect.reason } })); }
+    if (effect.type === 'change_gold') { const signed = Number(effect.amount) < 0 ? -amount : amount; const before = state.character.gold; state.character.gold = Math.max(0, before + signed); events.push(makeEvent(state, 'gold', `Moedas ${state.character.gold - before >= 0 ? '+' : ''}${state.character.gold - before}: ${effect.reason}.`, 'engine', 80, true, { type: 'CurrencyChanged', targetIds: [state.character.name], payload: { amount: state.character.gold - before, reason: effect.reason } })); }
+    if (effect.type === 'change_reputation') { const signed = Number(effect.amount) < 0 ? -amount : amount; const location = currentLocation(state); state.world.reputation.cities[location.id] = clamp((state.world.reputation.cities[location.id] || 0) + signed, -100, 100); events.push(makeEvent(state, 'reputation', `Reputação em ${location.name} ${signed >= 0 ? '+' : ''}${signed}: ${effect.reason}.`, 'engine', 80, true, { type: 'ReputationChanged', targetIds: [location.id], payload: { amount: signed, reason: effect.reason } })); }
+  }
   const evolved = withEvents(state, events);
   return deferSave ? evolved : updateSave(evolved);
 }
@@ -595,6 +676,7 @@ function applySocialConsequences(state: GameState, action: string, events: GameE
   const npc = {
     ...target,
     relationship: clamp(target.relationship + delta, -100, 100),
+    reputationWithPlayer: clamp(target.relationship + delta, -100, 100),
     memories: [...target.memories, socialMemory].slice(-12),
     memoryProfile: {
       ...target.memoryProfile,
@@ -614,11 +696,16 @@ function applySocialConsequences(state: GameState, action: string, events: GameE
   return { ...state, world: { ...state.world, npcs: { ...state.world.npcs, [npc.id]: npc }, reputation } };
 }
 
-export function beginAction(inputState: GameState, rawAction: string): EngineTurn {
+export function beginAction(inputState: GameState, rawAction: string, requestedTurnId = uid()): EngineTurn {
   const action = clean(rawAction, 500);
   if (!action) throw new Error('Descreva uma ação.');
   if (inputState.session.pendingRoll) throw new Error('Resolva a rolagem pendente antes de agir novamente.');
   let state = structuredClone(inputState);
+  const turnId = clean(requestedTurnId, 100) || uid();
+  if (state.world.processedTurnIds.includes(turnId)) return { state, requiresDice: Boolean(state.session.pendingRoll), roll: state.session.pendingRoll, events: [], fallbackNarrative: state.session.narrative };
+  state.session.currentTurnId = turnId;
+  tickSpellCooldowns(state);
+  state.character.activeEffects = state.character.activeEffects.map(effect => ({ ...effect, remainingTurns: effect.remainingTurns - 1 })).filter(effect => effect.remainingTurns > 0);
   state.visualCycle = advanceVisualCycle(state.visualCycle);
   state.session.turn += 1;
   state.session.lastRoll = null;
@@ -628,6 +715,11 @@ export function beginAction(inputState: GameState, rawAction: string): EngineTur
   const events: GameEvent[] = [makeEvent(state, 'action', action, 'player', 30, false)];
   const locationChange = inferLocation(action, state);
   if (locationChange && locationChange.location.id !== state.world.currentLocationId) {
+    const previous = currentLocation(state);
+    if (previous) { previous.current = false; previous.connectedLocationIds = Array.from(new Set([...previous.connectedLocationIds, locationChange.location.id])); previous.updatedAt = now(); }
+    locationChange.location.current = true;
+    locationChange.location.visited = true;
+    locationChange.location.connectedLocationIds = Array.from(new Set([...locationChange.location.connectedLocationIds, previous?.id].filter(Boolean) as string[]));
     state.world.locations[locationChange.location.id] = locationChange.location;
     state.world.currentLocationId = locationChange.location.id;
     events.push(makeEvent(state, 'world', `Local atual: ${locationChange.location.name}.`, 'world', 60));
@@ -658,7 +750,7 @@ function resolveCombat(state: GameState, result: RollResult, events: GameEvent[]
   if (result.success) {
     const damage = Math.max(1, 3 + attributeModifier(state.character.attributes.Força) + equipmentEffectTotal(state, 'damage_bonus') + (result.critical === 'success' ? 4 : 0));
     combat = { ...combat, enemyHp: Math.max(0, combat.enemyHp - damage) };
-    events.push(makeEvent(state, 'combat', `${combat.enemyName} sofreu ${damage} de dano.`, 'combat', 75));
+    events.push(makeEvent(state, 'combat', `${combat.enemyName} sofreu ${damage} de dano.`, 'combat', 75, true, { type: 'DamageApplied', targetIds: [combat.enemyName], payload: { amount: damage, basicAttack: true } }));
     if (combat.enemyHp === 0) {
       events.push(makeEvent(state, 'combat', `${combat.enemyName} foi derrotado.`, 'combat', 95));
       state = grantMilestoneXp(state, 18, 'vitória em um confronto relevante', events);
@@ -667,7 +759,7 @@ function resolveCombat(state: GameState, result: RollResult, events: GameEvent[]
   } else {
     const damage = Math.max(0, (result.critical === 'failure' ? 4 : 2) - equipmentEffectTotal(state, 'defense_bonus'));
     state = { ...state, character: { ...state.character, hp: Math.max(0, state.character.hp - damage) } };
-    events.push(makeEvent(state, 'combat', `${state.character.name} sofreu ${damage} de dano.`, 'combat', 80));
+    events.push(makeEvent(state, 'combat', `${state.character.name} sofreu ${damage} de dano.`, 'combat', 80, true, { type: 'DamageApplied', targetIds: [state.character.name], payload: { amount: damage } }));
   }
   return { ...state, session: { ...state.session, combat } };
 }
@@ -696,7 +788,8 @@ export function resolvePendingRoll(inputState: GameState, forcedDie?: number): {
 export function acceptNarrative(state: GameState, narrative: string, memorySummary?: string, memoryUpdate: string[] = [], worldDelta?: NarrativeWorldDelta): GameState {
   const safeNarrative = clean(narrative, 1800) || state.session.narrative;
   const memory = updateNarrativeMemory(state, safeNarrative, memorySummary, memoryUpdate, worldDelta);
-  return updateSave({ ...state, campaign: { ...state.campaign, memory }, session: { ...state.session, narrative: safeNarrative } });
+  const processedTurnIds = state.session.currentTurnId ? Array.from(new Set([...state.world.processedTurnIds, state.session.currentTurnId])).slice(-120) : state.world.processedTurnIds;
+  return updateSave({ ...state, campaign: { ...state.campaign, memory }, world: { ...state.world, processedTurnIds }, session: { ...state.session, narrative: safeNarrative } });
 }
 
 export function setActiveIllustration(inputState: GameState, assetId: string, generated = false): GameState {
@@ -736,12 +829,24 @@ export function performItemAction(inputState: GameState, input: ItemActionInput)
   const prepared = { ...inputState, visualCycle: advanceVisualCycle(inputState.visualCycle) };
   const result = executeItemAction(prepared, input);
   const text = result.messages.join(' ') || `${result.item.name} alterou permanentemente o estado da campanha.`;
-  const events = [makeEvent(result.state, 'item', text, 'engine', input.action === 'destroy' || input.action === 'lose' ? 82 : 70)];
+  const eventType: GameEventType = input.action === 'lose' || input.action === 'destroy' || input.action === 'discard' ? 'ItemLost' : input.action === 'use' ? 'ItemUsed' : 'WorldChanged';
+  const events = [makeEvent(result.state, 'item', text, 'engine', input.action === 'destroy' || input.action === 'lose' ? 82 : 70, true, { type: eventType, targetIds: [result.item.id], payload: { itemId: result.item.id, action: input.action } })];
+  if (result.state.character.hp > inputState.character.hp) events.push(makeEvent(result.state, 'combat', `Vitalidade restaurada em ${result.state.character.hp - inputState.character.hp}.`, 'engine', 82, true, { type: 'HealingApplied', targetIds: [result.state.character.name], payload: { amount: result.state.character.hp - inputState.character.hp, itemId: result.item.id } }));
+  if (result.state.character.mana > inputState.character.mana) events.push(makeEvent(result.state, 'magic', `Mana restaurada em ${result.state.character.mana - inputState.character.mana}.`, 'engine', 82, true, { type: 'ManaRestored', targetIds: [result.state.character.name], payload: { amount: result.state.character.mana - inputState.character.mana, itemId: result.item.id } }));
   const state = updateSave(withEvents(result.state, events));
   return { state, events, narrative: `${text} O mundo registra a consequência. O que você faz?` };
 }
 
-export function useInventoryItem(inputState: GameState, itemId: string) {
+export function performSpellCast(inputState: GameState, spellId: string): { state: GameState; events: GameEvent[]; narrative: string } {
+  const prepared = structuredClone(inputState);
+  prepared.visualCycle = advanceVisualCycle(prepared.visualCycle);
+  const result = castSpell(prepared, spellId);
+  const events = result.events.map(draft => makeEvent(result.state, 'magic', draft.text, draft.source || 'engine', draft.priority || 80, draft.persistent ?? true, draft));
+  const state = updateSave(withEvents(result.state, events));
+  return { state, events, narrative: `${events.map(event => event.text).join(' ')} O que você faz?` };
+}
+
+export function consumeInventoryItem(inputState: GameState, itemId: string) {
   return performItemAction(inputState, { action: 'use', itemId });
 }
 
@@ -779,16 +884,17 @@ export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload):
   const fallback = currentLocation(state);
   const locationName = clean(candidate?.name || fallback.name, 80);
   const region = clean(candidate?.region || fallback.region, 80);
-  const allowedKinds: Location['kind'][] = ['city', 'village', 'tavern', 'forest', 'river', 'road', 'ruin', 'wild'];
-  const location: Location = {
+  const genesisKind = clean(candidate?.kind || fallback.kind || 'wild', 40).toLowerCase();
+  const location = locationRecord(state, {
     id: `location-${hash(`${region}:${locationName}`).toString(36)}`,
     name: locationName,
     region,
-    kind: candidate && allowedKinds.includes(candidate.kind) ? candidate.kind : fallback.kind,
+    kind: genesisKind,
     description: clean(candidate?.description || fallback.description, 400),
     discovered: true,
-    visualIdentity: { ...defaultVisualIdentity(candidate && allowedKinds.includes(candidate.kind) ? candidate.kind : fallback.kind, candidate?.description || fallback.description), ...candidate?.visualIdentity },
-  };
+    visualIdentity: { ...defaultVisualIdentity(genesisKind, candidate?.description || fallback.description), ...candidate?.visualIdentity },
+  }, 'world-genesis');
+  location.current = true;
   const npcs: Record<string, NPC> = {};
   for (const candidateNpc of (genesis.npcs || []).slice(0, 6)) {
     const name = clean(candidateNpc.name || '', 60);
@@ -796,8 +902,10 @@ export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload):
     const id = `npc-${hash(name.toLowerCase()).toString(36)}`;
     const profession = clean(candidateNpc.profession || 'Ocupação desconhecida', 80);
     const personality = clean(candidateNpc.personality || '', 140);
-    npcs[id] = { id, name, role: clean(candidateNpc.role || 'Pessoa do mundo', 80), personality, goal: clean(candidateNpc.goal || '', 180), profession, locationId: location.id, relationship: 0, knowledge: [], memories: [], status: 'active', memoryProfile: defaultNpcMemory(personality), visualAppearance: { ...defaultAppearance(profession), ...candidateNpc.visualAppearance } };
+    npcs[id] = { id, campaignId: state.campaignId, name, role: clean(candidateNpc.role || 'Pessoa do mundo', 80), personality, goal: clean(candidateNpc.goal || '', 180), goals: [clean(candidateNpc.goal || '', 180)].filter(Boolean), profession, locationId: location.id, relationship: 0, relationships: [], reputationWithPlayer: 0, inventoryIds: [], createdFromEventId: 'world-genesis', knowledge: [], memories: [], status: 'active', memoryProfile: defaultNpcMemory(personality), visualAppearance: { ...defaultAppearance(profession), ...candidateNpc.visualAppearance } };
   }
+  location.residentNpcIds = Object.keys(npcs);
+  location.presentNpcIds = Object.keys(npcs);
   const factions: GameState['world']['factions'] = {};
   for (const candidateFaction of (genesis.factions || []).slice(0, 4)) {
     const name = clean(candidateFaction.name || '', 80);
@@ -835,18 +943,28 @@ export function applyGenesis(state: GameState, genesis: CampaignGenesisPayload):
   return acceptNarrative(next, genesis.narrative || state.session.narrative, premise, [`Cultura inicial: ${next.world.culture.name}.`, ...next.campaign.opportunities.map(value => `Oportunidade: ${value}`)]);
 }
 
-export function buildAiContext(state: GameState) {
+function buildAiContextUncached(state: GameState) {
   const location = currentLocation(state);
-  const nearbyNpcs = Object.values(state.world.npcs).filter(npc => npc.locationId === location.id && npc.status === 'active').slice(0, 4).map(npc => ({ name: npc.name, role: npc.role, personality: npc.personality, goal: npc.goal, relationship: npc.relationship, status: npc.status, memories: npc.memories.slice(-3) }));
-  const unavailableNpcs = Object.values(state.world.npcs).filter(npc => npc.status !== 'active').slice(-8).map(npc => ({ name: npc.name, status: npc.status, memories: npc.memories.slice(-2) }));
+  const allNpcs = Object.values(state.world.npcs);
+  const nearbyNpcs = allNpcs.filter(npc => npc.locationId === location.id && npc.status === 'active').slice(0, 4).map(npc => ({ name: npc.name, role: npc.role, goal: npc.goal, relationship: npc.relationship, memories: npc.memories.slice(-2) }));
+  const unavailableNpcs = allNpcs.filter(npc => npc.status !== 'active').slice(-5).map(npc => ({ name: npc.name, status: npc.status }));
   return {
-    campaign: { name: state.campaign.name, originPrompt: state.campaign.originPrompt, premise: state.campaign.premise, conflict: state.campaign.conflict, chapter: state.campaign.chapter, opportunities: state.campaign.opportunities },
-    character: { name: state.character.name, className: state.character.className, origin: state.character.origin, profession: state.character.profession, level: state.character.level, hp: state.character.hp, maxHp: state.character.maxHp, mana: state.character.mana, gold: state.character.gold, titles: state.character.titles, conditions: state.character.conditions },
-    world: { day: state.world.day, hour: state.world.hour, weather: state.world.weather, location, culture: state.world.culture, nearbyNpcs, unavailableNpcs, recentChanges: state.world.changes.slice(-12) },
-    objectives: state.campaign.quests.filter(quest => quest.status === 'active').map(quest => ({ title: quest.title, objectives: quest.objectives })),
+    campaign: { origin: state.campaign.originPrompt, premise: state.campaign.premise, conflict: state.campaign.conflict, opportunities: state.campaign.opportunities.slice(-6) },
+    character: { name: state.character.name, className: state.character.className, profession: state.character.profession, level: state.character.level, hp: state.character.hp, maxHp: state.character.maxHp, mana: state.character.mana, gold: state.character.gold, titles: state.character.titles.slice(-5), conditions: state.character.conditions, unlockedActions: state.character.unlockedActions.slice(-8), inventory: state.character.inventory.filter(item => item.state !== 'stored').slice(0, 12).map(item => ({ name: item.name, category: item.category, rarity: item.rarity, quantity: item.quantity, equipped: item.equipped, durability: item.durability, effects: item.effects.mechanical })) },
+    world: { day: state.world.day, hour: state.world.hour, weather: state.world.weather, location: { name: location.name, region: location.region, kind: location.kind, description: location.description }, culture: { name: state.world.culture.name, notes: state.world.culture.notes }, nearbyNpcs, unavailableNpcs, recentChanges: state.world.changes.slice(-6), unlocks: state.world.unlocks },
     memory: buildMemoryContext(state),
     pendingRoll: state.session.pendingRoll,
   };
+}
+
+export function buildAiContext(state: GameState) {
+  const cacheKey = `${state.campaignId}:${state.save.revision}`;
+  const cached = aiContextCache.get(cacheKey);
+  if (cached) return cached;
+  const context = buildAiContextUncached(state);
+  aiContextCache.set(cacheKey, context);
+  if (aiContextCache.size > 32) aiContextCache.delete(aiContextCache.keys().next().value!);
+  return context;
 }
 
 export function xpProgress(state: GameState) {
@@ -859,21 +977,42 @@ export function migrateState(value: unknown): GameState | null {
   if (!value || typeof value !== 'object') return null;
   const candidate = value as Partial<GameState> & Record<string, unknown>;
   const version = Number((candidate as Record<string, unknown>).schemaVersion);
-  if ([2, 3, 4, 5].includes(version) && candidate.character && candidate.world && candidate.session) {
+  if ([2, 3, 4, 5, 6, 7].includes(version) && candidate.character && candidate.world && candidate.session) {
     const current = candidate as any;
-    current.schemaVersion = 5;
+    current.schemaVersion = 7;
     current.visualCycle = migrateVisualCycle(current.visualCycle, current.campaignId, 0);
     current.campaign.originPrompt ||= current.character.origin || current.campaign.premise || 'A campanha foi recuperada de uma versão anterior.';
     current.campaign.opportunities ||= [];
     current.campaign.memory = migrateMemory(current.campaign.memory, current.campaign.originPrompt, current.campaign.premise, current.session.turn || 0, current.save?.createdAt || now());
     current.world.culture ||= { name: 'Cultura não registrada', values: [], customs: [], notes: 'Migrada de uma campanha anterior.' };
     current.world.changes ||= (current.world.timeline || []).slice(-40).map((event: GameEvent) => event.text);
-    for (const location of Object.values(current.world.locations || {}) as Location[]) location.visualIdentity ||= defaultVisualIdentity(location.kind, location.description);
+    current.character.unlockedActions ||= [];
+    current.character.professions ||= [current.character.profession].filter(Boolean);
+    current.character.energy = clamp(Number(current.character.energy ?? 10), 0, Number(current.character.maxEnergy ?? 10));
+    current.character.maxEnergy = Math.max(1, Number(current.character.maxEnergy ?? 10));
+    current.character.spells ||= [];
+    current.character.activeEffects ||= [];
+    current.character.inventory = (current.character.inventory || []).map((item: Partial<Item> & Pick<Item, 'name' | 'description'>) => normalizeItem(item, current.character.name, item.origin || 'Migrado de uma campanha anterior.', current.session.turn || 0));
+    current.world.itemRegistry ||= {};
+    for (const item of current.character.inventory as Item[]) current.world.itemRegistry[item.id] = structuredClone(item);
+    current.world.unlocks ||= { locations: [], dialogues: [], events: [] };
+    current.world.processedTurnIds ||= [];
+    current.session.currentTurnId ||= '';
+    for (const location of Object.values(current.world.locations || {}) as Location[]) {
+      location.campaignId ||= current.campaignId; location.visualIdentity ||= defaultVisualIdentity(location.kind, location.description); location.visited ??= location.discovered;
+      location.current = location.id === current.world.currentLocationId; location.status ||= 'active'; location.connectedLocationIds ||= []; location.residentNpcIds ||= []; location.presentNpcIds ||= [];
+      location.tags ||= [location.kind]; location.createdFromEventId ||= 'migration'; location.createdAt ||= current.save?.createdAt || now(); location.updatedAt ||= current.save?.updatedAt || now();
+    }
     for (const npc of Object.values(current.world.npcs || {}) as NPC[]) {
-      npc.status ||= 'active'; npc.memoryProfile ||= defaultNpcMemory(npc.personality); npc.visualAppearance ||= defaultAppearance(npc.profession);
+      npc.campaignId ||= current.campaignId; npc.status ||= 'active'; npc.goals ||= [npc.goal].filter(Boolean); npc.relationships ||= []; npc.reputationWithPlayer ??= npc.relationship || 0; npc.inventoryIds ||= []; npc.createdFromEventId ||= 'migration'; npc.memoryProfile ||= defaultNpcMemory(npc.personality); npc.visualAppearance ||= defaultAppearance(npc.profession);
     }
     for (const quest of current.campaign.quests || []) {
       quest.source ||= 'emergent'; quest.memory ||= { origin: 'Migrada de uma versão anterior.', motive: quest.description || quest.title, progress: [], consequences: [], personalGoal: quest.objectives?.[0]?.text || '' };
+      quest.originType ||= 'consequence'; quest.originEventId ||= 'migration'; quest.relevantNpcIds ||= []; quest.relevantLocationIds ||= [current.world.currentLocationId]; quest.consequences ||= []; quest.rewards ||= [{ type: 'xp', amount: quest.rewardXp || 0 }, { type: 'gold', amount: quest.rewardGold || 0 }]; quest.createdAt ||= current.save?.createdAt || now(); quest.updatedAt ||= now();
+      quest.objectives = (quest.objectives || []).map((objective: any) => ({ ...objective, conditionType: objective.conditionType || 'quest_progress', currentValue: objective.currentValue ?? (objective.completed ? 1 : 0), targetValue: objective.targetValue ?? 1, status: objective.status || (objective.completed ? 'completed' : 'active'), eventSubscriptions: objective.eventSubscriptions || ['QuestProgressed'] }));
+    }
+    for (const event of [...(current.world.timeline || []), ...(current.session.events || [])] as any[]) {
+      event.campaignId ||= current.campaignId; event.turnId ||= `legacy-turn-${event.turn || 0}`; event.eventType ||= EVENT_TYPE_BY_KIND[event.type as EventKind] || 'WorldChanged'; event.targetIds ||= []; event.payload ||= {}; event.schemaVersion ||= 1;
     }
     if (!current.world.economy) {
       const restored = createInitialState({ campaignName: current.campaign.name, characterName: current.character.name, className: current.character.className, openingPrompt: current.campaign.originPrompt });
@@ -896,12 +1035,5 @@ export function migrateState(value: unknown): GameState | null {
   fresh.session.narrative = Array.isArray(legacy.log) ? String(legacy.log.at(-1) || fresh.session.narrative) : fresh.session.narrative;
   return fresh;
 }
-
-// Compatibilidade temporária com versões anteriores do cliente.
-export const initialState = (characterName = 'Viajante', campaignName = 'Nova campanha', className = 'Explorador', openingPrompt = 'Minha história começa em um lugar ainda desconhecido.') => createInitialState({ characterName, campaignName, className, openingPrompt });
-export const advanceDemo = (state: GameState, action: string) => {
-  const result = beginAction(state, action);
-  return { narrative: result.fallbackNarrative, needsRoll: result.requiresDice, rollSkill: result.roll?.skill || null, rollDifficulty: result.roll?.difficulty || null, scene: currentLocation(result.state).name, locationChanged: false, events: result.events, state: acceptNarrative(result.state, result.fallbackNarrative) };
-};
 export type Event = GameEvent;
 export type ClassName = string;

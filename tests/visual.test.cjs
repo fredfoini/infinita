@@ -24,15 +24,19 @@ check(unsafe.mode === 'sanitized' && !/desmembr/i.test(unsafe.safeVisualSummary)
 for (const file of ['lib/visual/scene-descriptor.ts','lib/visual/image-provider.ts','lib/visual/visual-asset-repository.ts','lib/visual/visual-cycle.ts','components/SceneVisual.tsx','components/ParchmentWriting.tsx','components/AdminVisualDashboard.tsx','components/Logo.tsx','public/assets/logo.png','public/assets/parchment-writing-v1.gif','public/assets/parchment-writing-source-v1.png']) check(fs.existsSync(path.join(process.cwd(), file)), `${file} deve existir.`);
 check(fs.statSync(path.join(process.cwd(), 'public/assets/parchment-writing-v1.gif')).size < 2_000_000, 'GIF do pergaminho deve permanecer abaixo de 2 MB.');
 const game = read('components/Game.tsx');
-check(game.includes('<SceneVisual state={current} onIllustrationResolved={resolveIllustration} />') && !game.includes('ProceduralScene'), 'Ciclo visual deve substituir sprites no fluxo principal e persistir a ilustração.');
+check(game.includes("dynamic(() => import('@/components/SceneVisual')") && game.includes('onIllustrationResolved={resolveIllustration}') && !game.includes('ProceduralScene'), 'Ciclo visual deve carregar sob demanda e persistir a ilustração.');
 check(game.includes('MOCHILA') && !game.includes("setPanel('visual')") && game.includes('DIÁRIO'), 'HUD deve preservar inventário e diário sem expor controles técnicos visuais.');
 const intro = read('components/IntroSequence.tsx');
-check(intro.includes('<Logo variant="intro"') && intro.includes('Uma nova aventura criada por você'), 'Abertura deve reutilizar o logo oficial e a mensagem contratada.');
+check(intro.includes('<Logo variant="intro"') && intro.includes('O mundo se lembrará'), 'Abertura deve reutilizar o logo oficial e a nova mensagem contratada.');
 const css = read('app/globals.css');
 check(css.includes('.official-logo-menu') && css.includes('.parchment-gif') && css.includes('prefers-reduced-motion'), 'Logo e pergaminho 8-bit devem ser responsivos e respeitar movimento reduzido.');
 const route = read('app/api/visual/route.ts');
 check(route.includes('providerUnavailable') && route.includes('retryAfterSeconds'), 'API visual deve oferecer circuit breaker ao cliente.');
 check(!fs.existsSync(path.join(process.cwd(), 'lib/graphics/scene-composer.ts')), 'Scene Composer antigo deve sair do fluxo e do código morto.');
+check(game.includes('<MenuSpriteStage />') && read('components/MenuSpriteStage.tsx').includes('duelist-a'), 'Menu deve possuir pequenos personagens JRPG animados ao redor do logo.');
+check(game.includes('Escreva qualquer ação. Quando houver risco, você rolará um dado D20.'), 'Tutorial deve usar a mensagem simplificada aprovada.');
+check(game.includes('<span>ENERGIA</span>') && game.includes("sendTurn('castSpell'"), 'HUD deve refletir energia persistida e conjuração real da Engine.');
+check(read('components/IntroSequence.tsx').includes('INTRO_DURATION = 5') && read('components/IntroSequence.tsx').includes('PULAR'), 'Cutscene deve durar cinco segundos e manter Pular sempre disponível.');
 
 const providers = read('lib/providers/provider-factory.ts');
 const adapters = read('lib/providers/narrative-provider.ts');
