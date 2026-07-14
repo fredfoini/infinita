@@ -43,7 +43,24 @@ type GeminiPayload = {
 
 function parseJson<T>(value: string, provider: NarrativeProviderId) {
   const cleaned = value.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  try { return JSON.parse(cleaned) as T; }
+  const start = cleaned.indexOf('{');
+  let candidate = cleaned;
+  if (start >= 0) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < cleaned.length; index += 1) {
+      const character = cleaned[index];
+      if (escaped) { escaped = false; continue; }
+      if (character === '\\' && inString) { escaped = true; continue; }
+      if (character === '"') { inString = !inString; continue; }
+      if (inString) continue;
+      if (character === '{') depth += 1;
+      if (character === '}') depth -= 1;
+      if (depth === 0) { candidate = cleaned.slice(start, index + 1); break; }
+    }
+  }
+  try { return JSON.parse(candidate) as T; }
   catch { throw new NarrativeProviderError('O provedor retornou JSON inválido.', provider, undefined, 'invalid_json'); }
 }
 

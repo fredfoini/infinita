@@ -12,7 +12,7 @@ const circuitCooldownMs = Math.max(10000, Number(process.env.NARRATIVE_CIRCUIT_C
 function providerTimeout(id: NarrativeProviderId) {
   const shared = Number(process.env.NARRATIVE_PROVIDER_TIMEOUT_MS);
   if (shared > 0) return Math.max(3000, shared);
-  return id === 'groq' ? 8000 : id === 'gemini' ? 10000 : 12000;
+  return id === 'groq' ? 20000 : id === 'gemini' ? 25000 : 30000;
 }
 
 function providers(): NarrativeProvider[] { return [new GroqProvider(), new GeminiProvider(), new OpenAIProvider()]; }

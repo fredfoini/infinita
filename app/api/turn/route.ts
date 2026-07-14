@@ -6,6 +6,7 @@ import type { ItemAction } from '@/lib/items/item-engine';
 import { applyCampaignSharingDecision } from '@/lib/content-sharing-policy';
 
 export const runtime = 'nodejs';
+export const maxDuration = 60;
 
 type Payload = { kind?: 'action' | 'roll' | 'attribute' | 'useItem' | 'buyItem' | 'itemAction' | 'castSpell'; requestId?: string; action?: string; attribute?: string; itemId?: string; spellId?: string; secondaryItemId?: string; targetNpcId?: string; itemOperation?: ItemAction; shopId?: string; productId?: string; state?: unknown };
 
@@ -91,6 +92,13 @@ export async function POST(request: Request) {
     const llmStarted = performance.now();
     const narration = await narrateTurn(turn.state, action, turn.fallbackNarrative);
     const llmMs = performance.now() - llmStarted;
+    if (narration.mode !== 'ai') {
+      return respond({
+        error: 'O mestre narrativo não respondeu. Sua ação foi preservada; tente enviá-la novamente.',
+        retryable: true,
+        actionPreserved: true,
+      }, 503, `engine;dur=${engineMs.toFixed(1)},llm;dur=${llmMs.toFixed(1)}`);
+    }
     let next = turn.state;
     if (!next.session.pendingRoll && narration.reply.requiresDice) {
       next = acceptSuggestedRoll(next, action, { skill: narration.reply.skill, attribute: narration.reply.attribute, difficulty: narration.reply.difficulty, reason: narration.reply.reason, interpretation: narration.reply.actionInterpretation });

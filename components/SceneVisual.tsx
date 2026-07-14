@@ -1,9 +1,9 @@
 'use client';
 
 import { memo, useEffect, useMemo, useState } from 'react';
+import Image from 'next/image';
 import type { GameState } from '@/lib/engine';
 import ParchmentWriting from '@/components/ParchmentWriting';
-import LayeredWorldScene from '@/components/LayeredWorldScene';
 import { createSceneVisualDescriptor } from '@/lib/visual/scene-descriptor';
 import { findBestVisualAsset } from '@/lib/visual/semantic-matcher';
 import {
@@ -95,9 +95,10 @@ function SceneVisual({ state, onIllustrationResolved }: SceneVisualProps) {
     return () => { cancelled = true; };
   }, [state.campaignId, state.campaign.sharingMode, cycle.currentPhase, cycle.phaseStartAction, cycle.activeIllustrationId, descriptor, onIllustrationResolved]);
 
-  return <div className="scene-visual" data-source={status} data-phase={cycle.currentPhase}>
-    <LayeredWorldScene state={state} illustrationUrl={asset?.fileUrl} />
-    {status === 'generating' && <div className="visual-loading-parchment"><ParchmentWriting label="Preparando a próxima lembrança visual" /></div>}
+  return <div className="scene-visual" data-source={asset ? 'illustration' : status} data-phase={cycle.currentPhase}>
+    {asset
+      ? <Image className="scene-illustration" src={asset.fileUrl} alt={`Cena de ${descriptor.locationType}`} draggable={false} fill sizes="(max-width: 700px) 100vw, 680px" unoptimized />
+      : <ParchmentWriting label="O cronista prepara a próxima lembrança visual" />}
     {status === 'generating' && <span className="visual-loading">COMPONDO A CENA...</span>}
   </div>;
 }

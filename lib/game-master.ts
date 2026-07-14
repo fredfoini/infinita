@@ -37,22 +37,10 @@ async function requestJson<T>(system: string, user: string, maxTokens = 800): Pr
   return result?.data || null;
 }
 
-function proceduralReaction(state: GameState, action: string) {
-  const location = state.world.locations[state.world.currentLocationId];
-  const place = location?.name || 'este lugar';
-  const nearby = Object.values(state.world.npcs).find(npc => npc.locationId === location?.id && npc.status === 'active');
-  const normalized = action.toLocaleLowerCase('pt-BR');
-  if (/explor|procur|buscar|investig|examinar|vasculhar/.test(normalized)) return `Entre os limites de ${place}, um detalhe antes oculto revela uma passagem e sinais recentes de movimento. A descoberta abre uma direção concreta para seguir. O que você faz?`;
-  if (/convers|falo|digo|pergunt|cumpriment|elogio|negoci/.test(normalized)) return `${nearby?.name || 'A pessoa mais próxima'} interrompe o que fazia, avalia sua abordagem e responde com cautela, revelando uma nova tensão naquele encontro. O que você faz?`;
-  if (/viaj|caminh|sigo|vou|parto|cidade|estrada/.test(normalized)) return `A rota além de ${place} conduz a um trecho ainda desconhecido, onde marcas no caminho indicam presença recente. Ao longe, surge um novo ponto de interesse. O que você faz?`;
-  if (/atac|golpe|luto|mato|destr|incendi|queimo/.test(normalized)) return `O impacto rompe o equilíbrio de ${place}: quem está por perto recua, alarmes se espalham e uma oposição começa a se organizar. A consequência já está em movimento. O que você faz?`;
-  return `A rotina de ${place} é interrompida, e uma presença próxima toma a iniciativa diante da mudança. Uma nova situação se forma imediatamente. O que você faz?`;
-}
-
-function fallbackReply(state: GameState, fallbackNarrative: string, action = '', resolvedRoll = false): GameMasterReply {
+function fallbackReply(state: GameState, fallbackNarrative: string, resolvedRoll = false): GameMasterReply {
   const contextual = state.session.pendingRoll || resolvedRoll
     ? fallbackNarrative
-    : proceduralReaction(state, action);
+    : state.session.narrative;
   return {
     narrative: contextual,
     requiresDice: Boolean(state.session.pendingRoll), diceType: 'd20', difficulty: state.session.pendingRoll?.difficulty || null,
@@ -79,12 +67,12 @@ Só sugira magia quando o personagem realmente a aprender por treino, mestre, it
 actionInterpretation é apenas uma proposta semântica para a Engine validar. Interprete intenção, método, objeto, alvo, duração, risco e oposição; não escolha CD final. Use null quando a Engine já forneceu pendingRoll ou rollResult. Romance nunca é controle mental: Sedução usa Carisma para a qualidade da abordagem, enquanto perceber receptividade usa Sabedoria + Empatia, e nenhuma rolagem substitui consentimento, limites, personalidade ou objetivos do NPC.`;
   try {
     const reply = await requestJson<GameMasterReply>(`${baseRules}\n${contract}`, JSON.stringify({ context, playerAction: action, rollResult: rollResult || null }), 1800);
-    if (!reply) return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: 'Nenhum provedor narrativo está disponível.' };
+    if (!reply) return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: 'Nenhum provedor narrativo está disponível.' };
     if (typeof reply.narrative !== 'string' || !reply.narrative.trim()) {
-      return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: 'A IA retornou uma consequência narrativa vazia.' };
+      return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: 'A IA retornou uma consequência narrativa vazia.' };
     }
     if (rollResult?.consentRequired && violatesConsentContract(reply.narrative)) {
-      return { reply: fallbackReply(state, fallbackNarrative, action, true), mode: 'fallback', error: 'A consequência da IA violou o contrato de consentimento e foi rejeitada.' };
+      return { reply: fallbackReply(state, fallbackNarrative, true), mode: 'fallback', error: 'A consequência da IA violou o contrato de consentimento e foi rejeitada.' };
     }
     reply.requiresDice = Boolean(reply.requiresDice);
     if (rollResult) {
@@ -99,13 +87,17 @@ actionInterpretation é apenas uma proposta semântica para a Engine validar. In
     reply.memoryUpdate ||= [];
     if (!shouldConsolidateMemory(state, reply.worldDelta, reply.narrative)) reply.memorySummary = state.campaign.memory.campaignSummary.text;
     const validation = validateNarrativeConsistency(state, reply.narrative, reply.worldDelta);
-    reply.narrative = cleanNarrativeScaffolding(validation.narrative, state.character.name) || proceduralReaction(state, action);
+    const cleanedNarrative = cleanNarrativeScaffolding(validation.narrative, state.character.name);
+    if (!cleanedNarrative) {
+      return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: 'A IA não produziu uma consequência narrativa utilizável.' };
+    }
+    reply.narrative = cleanedNarrative;
     reply.worldDelta = validation.delta;
     if (validation.contradictions.length) reply.memoryUpdate.push(...validation.contradictions.map(value => `Correção de consistência: ${value}`));
     return { reply, mode: 'ai' };
   } catch (error) {
     console.error('INFINITA Game Master failed', error);
-    return { reply: fallbackReply(state, fallbackNarrative, action, Boolean(rollResult)), mode: 'fallback', error: error instanceof Error ? error.message : 'Falha no provedor de IA.' };
+    return { reply: fallbackReply(state, fallbackNarrative, Boolean(rollResult)), mode: 'fallback', error: error instanceof Error ? error.message : 'Falha no provedor de IA.' };
   }
 }
 

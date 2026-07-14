@@ -209,6 +209,7 @@ export default function Game() {
       update(reply.state);
       setNotice(reply.state.campaign.sharingMode === 'local-only' ? 'Campanha privada neste navegador.' : reply.mode === 'ai' ? 'Turno salvo.' : 'Progresso salvo localmente.');
     } catch (error) {
+      if (kind === 'action' && playerAction) setAction(playerAction);
       setNotice(error instanceof Error ? error.message : 'Não foi possível concluir o turno. Tente novamente.');
     } finally {
       setBusy(false);

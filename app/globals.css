@@ -27,6 +27,7 @@
 
 /* Ciclo visual oficial: pergaminho fixo e ilustração persistente em blocos de 10 ações. */
 .scene-visual{overflow:hidden;isolation:isolate;background:#241a27}
+.scene-visual .scene-illustration{position:absolute;inset:0;z-index:2;display:block;width:100%;height:100%;object-fit:cover;object-position:center;image-rendering:pixelated}
 .parchment-writing{position:absolute;inset:0;z-index:1;background:#241a27;overflow:hidden}
 .parchment-gif{display:block;width:100%;height:100%;object-fit:cover;object-position:center;image-rendering:pixelated}
 .parchment-caption{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);padding:7px 10px;color:#f5dfa0;background:#2c2038d9;border:2px solid #9c7652;font:clamp(5px,.62vw,8px) 'Press Start 2P';white-space:nowrap;text-shadow:1px 1px #261724}
