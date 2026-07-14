@@ -28,15 +28,10 @@
 /* Ciclo visual oficial: pergaminho fixo e ilustração persistente em blocos de 10 ações. */
 .scene-visual{overflow:hidden;isolation:isolate;background:#241a27}
 .parchment-writing{position:absolute;inset:0;z-index:1;background:#241a27;overflow:hidden}
-.parchment-writing svg{display:block;width:100%;height:100%}
+.parchment-gif{display:block;width:100%;height:100%;object-fit:cover;object-position:center;image-rendering:pixelated}
 .parchment-caption{position:absolute;left:50%;bottom:6%;transform:translateX(-50%);padding:7px 10px;color:#f5dfa0;background:#2c2038d9;border:2px solid #9c7652;font:clamp(5px,.62vw,8px) 'Press Start 2P';white-space:nowrap;text-shadow:1px 1px #261724}
-.parchment-marks path{stroke-width:6;stroke-dasharray:4 9;animation:parchmentWriting 5s steps(8) infinite}
-.quill{transform-box:fill-box;transform-origin:82% 92%;animation:quillWriting 4.8s steps(10) infinite}
-.inkwell{filter:drop-shadow(5px 7px 1px #241a2744)}
 .scene-visual .cycle-illustration{position:absolute;inset:0;z-index:2;width:100%;height:100%;object-fit:cover;object-position:center;image-rendering:pixelated;animation:illustrationReveal .45s ease-out both}
 .scene-visual[data-source="generating"] .parchment-writing{filter:saturate(.92)}
 .scene-visual .visual-loading{z-index:4}
-@keyframes quillWriting{0%,100%{transform:rotate(-3deg) translate(0,0)}20%{transform:rotate(2deg) translate(-32px,18px)}40%{transform:rotate(-1deg) translate(-62px,34px)}60%{transform:rotate(3deg) translate(-22px,50px)}80%{transform:rotate(0) translate(-54px,68px)}}
-@keyframes parchmentWriting{0%{stroke-dashoffset:80;opacity:.58}55%{opacity:.9}100%{stroke-dashoffset:0;opacity:.58}}
 @keyframes illustrationReveal{from{opacity:0;filter:sepia(.5) brightness(.65)}to{opacity:1;filter:none}}
-@media(prefers-reduced-motion:reduce){.quill,.parchment-marks path,.scene-visual .cycle-illustration{animation:none!important}.scene-visual .cycle-illustration{opacity:1}}
+@media(prefers-reduced-motion:reduce){.parchment-gif{display:none}.parchment-writing{background:url('/assets/parchment-writing-source-v1.png') center/cover no-repeat}.scene-visual .cycle-illustration{animation:none!important;opacity:1}}

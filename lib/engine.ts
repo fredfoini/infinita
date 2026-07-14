@@ -13,14 +13,30 @@ export type Skill = {
   trained: boolean;
 };
 
+export type ItemCategory = 'consumable' | 'tool' | 'weapon' | 'armor' | 'accessory' | 'material' | 'quest' | 'document' | 'key' | 'relic' | 'narrative';
+export type ItemRarity = 'common' | 'uncommon' | 'rare' | 'epic' | 'legendary';
+export type ItemState = 'carried' | 'equipped' | 'stored' | 'lent' | 'lost' | 'stolen' | 'destroyed' | 'discarded';
+export type ItemMechanicalEffect = { type: 'restore_hp' | 'restore_mana' | 'attribute_bonus' | 'skill_bonus' | 'unlock_action' | 'unlock_location' | 'unlock_dialogue' | 'unlock_profession' | 'trigger_event' | 'damage_bonus' | 'defense_bonus'; target?: string; value: number; duration?: number };
+export type ItemHistoryEntry = { turn: number; action: string; detail: string; ownerId: string; createdAt: string };
+
 export type Item = {
   id: string;
   name: string;
   kind: 'arma' | 'armadura' | 'consumível' | 'ferramenta' | 'material' | 'missão';
+  category: ItemCategory;
+  rarity: ItemRarity;
+  weight: number;
   quantity: number;
   value: number;
   description: string;
-  equipped?: boolean;
+  state: ItemState;
+  origin: string;
+  effects: { narrative: string[]; mechanical: ItemMechanicalEffect[] };
+  stack: { stackable: boolean; max: number };
+  durability: { current: number; max: number } | null;
+  ownerId: string;
+  history: ItemHistoryEntry[];
+  equipped: boolean;
 };
 
 export type GameEvent = {
@@ -36,6 +52,7 @@ export type GameEvent = {
 
 import { appendSessionMemory, buildMemoryContext, createMemoryState, migrateMemory, updateNarrativeMemory } from '@/lib/memory/memory-builder';
 import { advanceVisualCycle, attachCycleIllustration, createVisualCycle, migrateVisualCycle, type CampaignVisualCycle } from '@/lib/visual/visual-cycle';
+import { equipmentEffectTotal, executeItemAction, normalizeItem, registerSuggestedItems, type ItemActionInput } from '@/lib/items/item-engine';
 
 export type Quest = {
   id: string;
@@ -121,7 +138,7 @@ export type MemoryState = {
 };
 
 export type GameState = {
-  schemaVersion: 5;
+  schemaVersion: 6;
   campaignId: string;
   visualCycle: CampaignVisualCycle;
   campaign: {
@@ -152,6 +169,8 @@ export type GameState = {
     gold: number;
     skills: Record<string, Skill>;
     inventory: Item[];
+    unlockedActions: string[];
+    professions: string[];
     titles: string[];
     conditions: Array<{ name: string; remainingTurns: number; modifier: number }>;
   };
@@ -165,6 +184,8 @@ export type GameState = {
     factions: Record<string, { id: string; name: string; goal: string }>;
     culture: { name: string; values: string[]; customs: string[]; notes: string };
     changes: string[];
+    itemRegistry: Record<string, Item>;
+    unlocks: { locations: string[]; dialogues: string[]; events: string[] };
     economy: {
       regionMultiplier: number;
       shops: Record<string, { id: string; name: string; locationId: string; products: ShopProduct[] }>;
@@ -204,6 +225,10 @@ export type NarrativeWorldDelta = {
   opportunities?: string[];
   quests?: Array<{ title: string; description: string; objective: string; status: Quest['status'] }>;
   worldChanges?: string[];
+  items?: Array<{
+    name: string; description: string; category: ItemCategory; rarity?: ItemRarity; weight?: number; value?: number; quantity?: number;
+    origin: string; narrativeEffects?: string[]; mechanicalEffects: ItemMechanicalEffect[]; durability?: number | null;
+  }>;
 };
 
 export type CampaignGenesisPayload = {
@@ -332,8 +357,13 @@ export function createInitialState(input: NewCampaignInput): GameState {
     Pesca: makeSkill('Pesca', 'Sabedoria'),
   };
   const originLocation: Location = { id: `origin-${hash(input.openingPrompt).toString(36)}`, name: 'Cena Inicial', region: 'Região Desconhecida', kind: 'wild', description: clean(input.openingPrompt, 500), discovered: true, visualIdentity: defaultVisualIdentity('wild', input.openingPrompt) };
+  const ownerId = clean(input.characterName, 60);
+  const initialItems = [
+    normalizeItem({ name: 'Ração de viagem', description: 'Recupera forças durante um descanso.', kind: 'consumível', category: 'consumable', quantity: 3, value: 2, effects: { narrative: ['Uma refeição simples torna a marcha suportável.'], mechanical: [{ type: 'restore_hp', value: 4 }] } }, ownerId, `Equipamento inicial de ${input.className}.`),
+    normalizeItem({ name: 'Tocha', description: 'Ilumina locais escuros e permite explorar sem luz.', kind: 'ferramenta', category: 'tool', quantity: 1, value: 3, effects: { narrative: ['Afasta a escuridão imediata.'], mechanical: [{ type: 'unlock_action', target: 'explorar locais escuros', value: 1 }] } }, ownerId, `Equipamento inicial de ${input.className}.`),
+  ];
   const state: GameState = {
-    schemaVersion: 5,
+    schemaVersion: 6,
     campaignId,
     visualCycle: createVisualCycle(campaignId),
     campaign: {
@@ -350,11 +380,7 @@ export function createInitialState(input: NewCampaignInput): GameState {
       name: clean(input.characterName, 60), className: clean(input.className, 80), origin: opening.origin, profession: opening.profession, birthRegion: opening.birthRegion,
       level: 1, xp: 0, xpToNext: xpThreshold(2), attributePoints: 0, attributes,
       hp: template.hp + attributeModifier(attributes.Constituição), maxHp: template.hp + attributeModifier(attributes.Constituição), mana: template.mana, maxMana: template.mana,
-      gold: 12, skills,
-      inventory: [
-        { id: uid(), name: 'Ração de viagem', kind: 'consumível', quantity: 3, value: 2, description: 'Recupera forças durante um descanso.' },
-        { id: uid(), name: 'Tocha', kind: 'ferramenta', quantity: 1, value: 3, description: 'Ilumina locais escuros.' },
-      ],
+      gold: 12, skills, inventory: initialItems, unlockedActions: [], professions: [opening.profession],
       titles: [], conditions: [],
     },
     world: {
@@ -363,6 +389,8 @@ export function createInitialState(input: NewCampaignInput): GameState {
       factions: {},
       culture: { name: 'Cultura ainda não revelada', values: [], customs: [], notes: 'Será descoberta conforme a campanha emergir.' },
       changes: [`A campanha nasceu da origem: ${clean(input.openingPrompt, 300)}`],
+      itemRegistry: Object.fromEntries(initialItems.map(item => [item.id, structuredClone(item)])),
+      unlocks: { locations: [], dialogues: [], events: [] },
       economy: { regionMultiplier: 1, shops: {} },
       reputation: { individuals: {}, cities: { [originLocation.id]: 0 }, factions: {}, regions: { [originLocation.region]: 0 }, kingdoms: {}, moral: 0 }, timeline: [],
     },
@@ -452,7 +480,7 @@ export function grantMilestoneXp(state: GameState, amount: number, reason: strin
   return { ...state, character };
 }
 
-export function applyNarrativeWorldDelta(inputState: GameState, delta?: NarrativeWorldDelta): GameState {
+export function applyNarrativeWorldDelta(inputState: GameState, delta?: NarrativeWorldDelta, narrative = '', deferSave = false): GameState {
   if (!delta) return inputState;
   let state = structuredClone(inputState);
   const events: GameEvent[] = [];
@@ -547,7 +575,11 @@ export function applyNarrativeWorldDelta(inputState: GameState, delta?: Narrativ
   const changes = (delta.worldChanges || []).map(value => clean(value, 260)).filter(Boolean);
   state.world.changes = [...state.world.changes, ...changes].slice(-100);
   for (const change of changes) events.push(makeEvent(state, 'world', change, 'world', 60));
-  return updateSave(withEvents(state, events));
+  const itemResult = registerSuggestedItems(state, delta.items, narrative);
+  state = itemResult.state;
+  for (const item of itemResult.created) events.push(makeEvent(state, 'item', `Item adquirido: ${item.name} (${item.rarity}). ${item.effects.mechanical.map(effect => effect.target || effect.type).join(', ')}.`, 'world', 78));
+  const evolved = withEvents(state, events);
+  return deferSave ? evolved : updateSave(evolved);
 }
 
 function applySocialConsequences(state: GameState, action: string, events: GameEvent[]): GameState {
@@ -624,7 +656,7 @@ function resolveCombat(state: GameState, result: RollResult, events: GameEvent[]
   if (!/atac|golpear|lutar|dispar/.test(result.action.toLowerCase())) return state;
   let combat = state.session.combat || { enemyName: 'Adversário', enemyHp: 10, enemyMaxHp: 10, defense: 12, initiative: 'player' as const };
   if (result.success) {
-    const damage = Math.max(1, 3 + attributeModifier(state.character.attributes.Força) + (result.critical === 'success' ? 4 : 0));
+    const damage = Math.max(1, 3 + attributeModifier(state.character.attributes.Força) + equipmentEffectTotal(state, 'damage_bonus') + (result.critical === 'success' ? 4 : 0));
     combat = { ...combat, enemyHp: Math.max(0, combat.enemyHp - damage) };
     events.push(makeEvent(state, 'combat', `${combat.enemyName} sofreu ${damage} de dano.`, 'combat', 75));
     if (combat.enemyHp === 0) {
@@ -633,7 +665,7 @@ function resolveCombat(state: GameState, result: RollResult, events: GameEvent[]
       return { ...state, session: { ...state.session, combat: null } };
     }
   } else {
-    const damage = result.critical === 'failure' ? 4 : 2;
+    const damage = Math.max(0, (result.critical === 'failure' ? 4 : 2) - equipmentEffectTotal(state, 'defense_bonus'));
     state = { ...state, character: { ...state.character, hp: Math.max(0, state.character.hp - damage) } };
     events.push(makeEvent(state, 'combat', `${state.character.name} sofreu ${damage} de dano.`, 'combat', 80));
   }
@@ -647,8 +679,8 @@ export function resolvePendingRoll(inputState: GameState, forcedDie?: number): {
   state.visualCycle = advanceVisualCycle(state.visualCycle);
   const skill = state.character.skills[pending.skill] || makeSkill(pending.skill, pending.attribute);
   const die = clamp(forcedDie || Math.floor(Math.random() * 20) + 1, 1, 20);
-  const attributeBonus = attributeModifier(state.character.attributes[pending.attribute]);
-  const skillBonus = (skill.level - 1) + (skill.trained ? 2 : 0);
+  const attributeBonus = attributeModifier(state.character.attributes[pending.attribute]) + equipmentEffectTotal(state, 'attribute_bonus', pending.attribute);
+  const skillBonus = (skill.level - 1) + (skill.trained ? 2 : 0) + equipmentEffectTotal(state, 'skill_bonus', pending.skill);
   const total = die + attributeBonus + skillBonus;
   const result: RollResult = { ...pending, die, attributeBonus, skillBonus, total, success: die === 20 || (die !== 1 && total >= pending.difficulty), critical: die === 20 ? 'success' : die === 1 ? 'failure' : null };
   const events: GameEvent[] = [makeEvent(state, 'roll', `${pending.skill}: d20 (${die}) + atributo ${attributeBonus >= 0 ? '+' : ''}${attributeBonus} + perícia ${skillBonus} = ${total} contra CD ${pending.difficulty}. ${result.success ? 'SUCESSO' : 'FALHA'}.`, 'engine', 100)];
@@ -700,21 +732,17 @@ export function spendAttributePoint(inputState: GameState, attribute: AttributeK
   return { state, events };
 }
 
-export function useInventoryItem(inputState: GameState, itemId: string): { state: GameState; events: GameEvent[]; narrative: string } {
-  const item = inputState.character.inventory.find(candidate => candidate.id === itemId);
-  if (!item) throw new Error('Item não encontrado no inventário.');
-  if (item.kind !== 'consumível') throw new Error('Este item não pode ser consumido agora.');
-  let state = structuredClone(inputState);
-  state.visualCycle = advanceVisualCycle(state.visualCycle);
-  const events: GameEvent[] = [];
-  if (/ração|poção|alimento/i.test(item.name)) {
-    const recovered = Math.min(4, state.character.maxHp - state.character.hp);
-    state.character.hp += recovered;
-    events.push(makeEvent(state, 'item', `${item.name} usado. ${recovered > 0 ? `Vitalidade +${recovered}.` : 'A vitalidade já estava completa.'}`, 'engine', 70));
-  }
-  state.character.inventory = state.character.inventory.map(candidate => candidate.id === itemId ? { ...candidate, quantity: candidate.quantity - 1 } : candidate).filter(candidate => candidate.quantity > 0);
-  state = updateSave(withEvents(state, events));
-  return { state, events, narrative: `${state.character.name} usa ${item.name}. A ação é registrada pelo mundo. O que você faz?` };
+export function performItemAction(inputState: GameState, input: ItemActionInput): { state: GameState; events: GameEvent[]; narrative: string } {
+  const prepared = { ...inputState, visualCycle: advanceVisualCycle(inputState.visualCycle) };
+  const result = executeItemAction(prepared, input);
+  const text = result.messages.join(' ') || `${result.item.name} alterou permanentemente o estado da campanha.`;
+  const events = [makeEvent(result.state, 'item', text, 'engine', input.action === 'destroy' || input.action === 'lose' ? 82 : 70)];
+  const state = updateSave(withEvents(result.state, events));
+  return { state, events, narrative: `${text} O mundo registra a consequência. O que você faz?` };
+}
+
+export function useInventoryItem(inputState: GameState, itemId: string) {
+  return performItemAction(inputState, { action: 'use', itemId });
 }
 
 export function productPrice(state: GameState, product: ShopProduct) {
@@ -734,8 +762,12 @@ export function buyProduct(inputState: GameState, shopId: string, productId: str
   state.visualCycle = advanceVisualCycle(state.visualCycle);
   state.character.gold -= price;
   const existing = state.character.inventory.find(item => item.name === product.name);
-  if (existing) existing.quantity += 1;
-  else state.character.inventory.push({ id: uid(), name: product.name, kind: product.kind, quantity: 1, value: product.basePrice, description: product.description });
+  if (existing) { existing.quantity = Math.min(existing.stack.max, existing.quantity + 1); state.world.itemRegistry[existing.id] = structuredClone(existing); }
+  else {
+    const item = normalizeItem({ name: product.name, kind: product.kind, description: product.description, quantity: 1, value: product.basePrice }, state.character.name, `Comprado em ${shop.name}.`, state.session.turn);
+    state.character.inventory.push(item);
+    state.world.itemRegistry[item.id] = structuredClone(item);
+  }
   state.world.economy.shops[shopId].products = state.world.economy.shops[shopId].products.map(candidate => candidate.id === productId ? { ...candidate, stock: candidate.stock - 1 } : candidate);
   const events = [makeEvent(state, 'gold', `${product.name} comprado por ${price} moedas.`, 'engine', 70)];
   state = updateSave(withEvents(state, events));

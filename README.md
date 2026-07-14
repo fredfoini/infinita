@@ -46,12 +46,12 @@ Falha, falta de crédito, rate limit ou ausência de chave nunca bloqueiam o tur
 
 ## Ciclo visual persistente
 
-- Ações válidas 1–10: pergaminho animado local `ui_story_parchment_writing_v1`.
+- Ações válidas 1–10: GIF 8-bit local `ui_story_parchment_writing_v1`, construído na mesma direção de arte GBA das ilustrações.
 - Ações válidas 11–20: uma ilustração escolhida do cache ou gerada uma única vez.
 - O padrão se repete, e a mesma imagem permanece por todo o bloco ilustrado.
 - Cliques em menus não contam; texto aceito, dado concluído e escolhas contextuais persistidas contam.
 - Se a OpenAI estiver indisponível, o jogo usa o melhor cache e depois o pergaminho, sem interromper texto ou input.
-- O pergaminho está isolado em `components/ParchmentWriting.tsx`; seu visual pode ser substituído sem tocar na Engine.
+- O pergaminho está isolado em `components/ParchmentWriting.tsx`; a fonte fica em `public/assets/parchment-writing-source-v1.png` e o loop otimizado em `public/assets/parchment-writing-v1.gif`.
 
 ## Banco visual acumulativo
 
